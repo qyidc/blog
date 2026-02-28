@@ -47,8 +47,16 @@ const BasicAuth = async (c: Context<Env>, next: Next) => {
   try {
     const decoded = atob(encoded);
     const [username, password] = decoded.split(':');
-    const storedUsername = c.env.ADMIN_USERNAME;
-    const storedPassword = c.env.ADMIN_PASSWORD;
+    
+    // 从数据库中获取用户名和密码设置
+    const [usernameResult, passwordResult] = await Promise.all([
+      c.env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind('admin_username').first<{ value: string }>(),
+      c.env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind('admin_password').first<{ value: string }>()
+    ]);
+    
+    const storedUsername = usernameResult?.value || 'admin'; // 默认用户名为 admin
+    const storedPassword = passwordResult?.value || 'admin123'; // 默认密码为 admin123
+    
     if (username === storedUsername && password === storedPassword) {
       await next();
     } else {
@@ -608,7 +616,6 @@ api.use('*', BasicAuth); // 将认证中间件应用到此组的所有路由
 api.use('*', cors()); // 将 CORS 应用到所有 API 路由
 
 // 在这里定义所有需要认证的 API 端点
-// [新增] 系统统计接口
 api.get('/statistics', async (c) => {
     try {
         // 统计各项数据
@@ -1314,7 +1321,197 @@ app.get('/api/posts/:postId/views', async (c) => {
         console.error('更新阅读数失败:', e);
         return c.json({ error: '更新阅读数失败' }, 500);
     }
-});
+  });
+
+  // 更新管理员设置（用户名和密码）
+  api.post('/settings/admin', async (c) => {
+    try {
+      const body = await c.req.json<{ username: string; password: string }>();
+      
+      if (!body.username || !body.password) {
+        return c.json({ error: '用户名和密码不能为空' }, 400);
+      }
+      
+      // 更新用户名和密码设置
+      await Promise.all([
+        c.env.DB.prepare(
+          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+        ).bind('admin_username', body.username).run(),
+        c.env.DB.prepare(
+          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+        ).bind('admin_password', body.password).run()
+      ]);
+      
+      return c.json({ success: true, message: '管理员设置更新成功' });
+    } catch (e: any) {
+      console.error('更新管理员设置失败:', e);
+      return c.json({ error: '更新管理员设置失败' }, 500);
+    }
+  });
+
+  // 数据备份 API
+  api.get('/backup', async (c) => {
+    try {
+      // 备份所有表数据（只选择实际存在的字段）
+      const [posts, images, comments, postViews, postViewsLog, ipBlacklist, settings] = await Promise.all([
+        c.env.DB.prepare('SELECT id, title, slug, content, category, tags, published_at, is_published, is_draft, is_pinned FROM posts').all(),
+        c.env.DB.prepare('SELECT id, file_name, file_path, file_size, file_type, upload_at, post_id FROM images').all(),
+        c.env.DB.prepare('SELECT id, post_id, author, email, content, ip_address, is_approved, parent_id, reply_to FROM comments').all(),
+        c.env.DB.prepare('SELECT post_id, view_count, last_viewed_at FROM post_views').all(),
+        c.env.DB.prepare('SELECT post_id, ip_address, created_at FROM post_views_log').all(),
+        c.env.DB.prepare('SELECT id, ip_address, reason, expires_at FROM ip_blacklist').all(),
+        c.env.DB.prepare('SELECT key, value FROM settings').all()
+      ]);
+
+      const backupData = {
+        version: '1.0',
+        timestamp: new Date().toISOString(),
+        data: {
+          posts: posts.results,
+          images: images.results,
+          comments: comments.results,
+          post_views: postViews.results,
+          post_views_log: postViewsLog.results,
+          ip_blacklist: ipBlacklist.results,
+          settings: settings.results
+        }
+      };
+
+      return new Response(JSON.stringify(backupData, null, 2), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Disposition': `attachment; filename="blog-backup-${new Date().toISOString().split('T')[0]}.json"`
+        }
+      });
+    } catch (e: any) {
+      console.error('备份数据失败:', e);
+      return c.json({ error: '备份数据失败' }, 500);
+    }
+  });
+
+  // 数据恢复 API
+  api.post('/restore', async (c) => {
+    try {
+      const body = await c.req.json();
+      
+      if (!body.data) {
+        return c.json({ error: '无效的备份数据' }, 400);
+      }
+
+      // 清空所有表（按依赖顺序删除）
+      await c.env.DB.prepare('DELETE FROM post_views_log').run();
+      await c.env.DB.prepare('DELETE FROM post_views').run();
+      await c.env.DB.prepare('DELETE FROM comments').run();
+      await c.env.DB.prepare('DELETE FROM images').run();
+      await c.env.DB.prepare('DELETE FROM ip_blacklist').run();
+      await c.env.DB.prepare('DELETE FROM settings').run();
+      await c.env.DB.prepare('DELETE FROM posts').run();
+
+      // 恢复数据
+      if (body.data.settings) {
+        for (const setting of body.data.settings) {
+          await c.env.DB.prepare(
+            'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+          ).bind(setting.key || '', setting.value || '').run();
+        }
+      }
+
+      if (body.data.posts) {
+        for (const post of body.data.posts) {
+          await c.env.DB.prepare(
+            'INSERT INTO posts (id, title, slug, content, category, tags, published_at, is_published, is_draft, is_pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          ).bind(
+            post.id || '',
+            post.title || '',
+            post.slug || '',
+            post.content || '',
+            post.category || null,
+            post.tags || null,
+            post.published_at || null,
+            post.is_published ?? 0,
+            post.is_draft ?? 0,
+            post.is_pinned ?? 0
+          ).run();
+        }
+      }
+
+      if (body.data.images) {
+        for (const image of body.data.images) {
+          await c.env.DB.prepare(
+            'INSERT INTO images (id, file_name, file_path, file_size, file_type, upload_at, post_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).bind(
+            image.id || '',
+            image.file_name || '',
+            image.file_path || '',
+            image.file_size || 0,
+            image.file_type || '',
+            image.upload_at || new Date().toISOString(),
+            image.post_id || null
+          ).run();
+        }
+      }
+
+      if (body.data.comments) {
+        for (const comment of body.data.comments) {
+          await c.env.DB.prepare(
+            'INSERT INTO comments (id, post_id, author, email, content, ip_address, is_approved, parent_id, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          ).bind(
+            comment.id || '',
+            comment.post_id || '',
+            comment.author || '',
+            comment.email || null,
+            comment.content || '',
+            comment.ip_address || '',
+            comment.is_approved ?? 0,
+            comment.parent_id || null,
+            comment.reply_to || null
+          ).run();
+        }
+      }
+
+      if (body.data.post_views) {
+        for (const view of body.data.post_views) {
+          await c.env.DB.prepare(
+            'INSERT INTO post_views (post_id, view_count, last_viewed_at) VALUES (?, ?, ?)'
+          ).bind(
+            view.post_id || '',
+            view.view_count ?? 0,
+            view.last_viewed_at || new Date().toISOString()
+          ).run();
+        }
+      }
+
+      if (body.data.post_views_log) {
+        for (const log of body.data.post_views_log) {
+          await c.env.DB.prepare(
+            'INSERT INTO post_views_log (post_id, ip_address, created_at) VALUES (?, ?, ?)'
+          ).bind(
+            log.post_id || '',
+            log.ip_address || '',
+            log.created_at || new Date().toISOString()
+          ).run();
+        }
+      }
+
+      if (body.data.ip_blacklist) {
+        for (const item of body.data.ip_blacklist) {
+          await c.env.DB.prepare(
+            'INSERT INTO ip_blacklist (id, ip_address, reason, expires_at) VALUES (?, ?, ?, ?)'
+          ).bind(
+            item.id || '',
+            item.ip_address || '',
+            item.reason || null,
+            item.expires_at || null
+          ).run();
+        }
+      }
+
+      return c.json({ success: true, message: '数据恢复成功' });
+    } catch (e: any) {
+      console.error('恢复数据失败:', e);
+      return c.json({ error: '恢复数据失败: ' + e.message }, 500);
+    }
+  });
 
 // 评论提交 API 路由 (公共API，不需要认证)
 app.post('/api/posts/:postId/comments', async (c) => {

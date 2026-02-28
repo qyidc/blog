@@ -682,6 +682,32 @@ document.addEventListener('DOMContentLoaded', () => {
             form.setAttribute('aria-busy', 'false'); 
         }
     }
+    
+    async function handleAdminSettingsSubmit(e) {
+        e.preventDefault(); const form = e.target; form.setAttribute('aria-busy', 'true');
+        const username = document.getElementById('admin_username').value;
+        const password = document.getElementById('admin_password').value;
+        const passwordConfirm = document.getElementById('admin_password_confirm').value;
+        
+        if (password !== passwordConfirm) {
+            alert('两次输入的密码不一致，请重新输入！');
+            form.setAttribute('aria-busy', 'false');
+            return;
+        }
+        
+        const data = { 
+            username: username,
+            password: password 
+        };
+        try { 
+            await apiRequest('/settings/admin', 'POST', data); 
+            alert('管理员设置更新成功! 下次登录时请使用新的用户名和密码。'); 
+        } catch(e) { 
+            alert(`保存失败: ${e.message}`); 
+        } finally { 
+            form.setAttribute('aria-busy', 'false'); 
+        }
+    }
     async function handleRebuild(e) {
         const rebuildBtn = document.getElementById('rebuild-all-btn');
         if (rebuildBtn && e.target === rebuildBtn && confirm('确认要重建所有静态页面吗？此操作可能需要几分钟时间。')) {
@@ -694,9 +720,115 @@ document.addEventListener('DOMContentLoaded', () => {
             finally { rebuildBtn.setAttribute('aria-busy', 'false'); rebuildBtn.textContent = '开始重建'; }
         }
     }
+    
+    async function handleBackup(e) {
+        const backupBtn = document.getElementById('backup-btn');
+        if (backupBtn && e.target === backupBtn) {
+            backupBtn.setAttribute('aria-busy', 'true');
+            backupBtn.textContent = '备份中...';
+            try {
+                const response = await fetch(`${API_BASE}/backup`);
+                if (!response.ok) {
+                    throw new Error('备份失败');
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `blog-backup-${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                alert('备份成功！备份文件已下载。');
+            } catch (err) { 
+                alert(`备份失败: ${err.message}`); 
+            } finally { 
+                backupBtn.setAttribute('aria-busy', 'false'); 
+                backupBtn.textContent = '下载备份'; 
+            }
+        }
+    }
+    
+    function handleRestoreClick(e) {
+        const restoreBtn = document.getElementById('restore-btn');
+        if (restoreBtn && e.target === restoreBtn) {
+            document.getElementById('restore-file').click();
+        }
+    }
+    
+    async function handleRestoreFile(e) {
+        const fileInput = e.target;
+        if (!fileInput.files || fileInput.files.length === 0) {
+            return;
+        }
+        
+        const file = fileInput.files[0];
+        if (!file.name.endsWith('.json')) {
+            alert('请选择有效的备份文件（.json格式）');
+            return;
+        }
+        
+        if (!confirm('确认要恢复数据吗？此操作将覆盖当前所有数据！')) {
+            return;
+        }
+        
+        const restoreBtn = document.getElementById('restore-btn');
+        restoreBtn.setAttribute('aria-busy', 'true');
+        restoreBtn.textContent = '恢复中...';
+        
+        try {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const backupData = JSON.parse(event.target.result);
+                    const result = await apiRequest('/restore', 'POST', backupData);
+                    alert('数据恢复成功！');
+                } catch (err) {
+                    alert(`恢复失败: ${err.message}`);
+                } finally {
+                    restoreBtn.setAttribute('aria-busy', 'false');
+                    restoreBtn.textContent = '上传恢复';
+                    fileInput.value = '';
+                }
+            };
+            reader.onerror = () => {
+                alert('读取文件失败');
+                restoreBtn.setAttribute('aria-busy', 'false');
+                restoreBtn.textContent = '上传恢复';
+                fileInput.value = '';
+            };
+            reader.readAsText(file);
+        } catch (err) {
+            alert(`恢复失败: ${err.message}`);
+            restoreBtn.setAttribute('aria-busy', 'false');
+            restoreBtn.textContent = '上传恢复';
+            fileInput.value = '';
+        }
+    }
 
     // --- 4. 总初始化函数 ---
-    function initialize() {
+    async function checkAuth() {
+        try {
+            await apiRequest('/statistics');
+            return true;
+        } catch (err) {
+            if (err.message === 'Unauthorized') {
+                // 未认证，重新触发认证
+                window.location.reload();
+                return false;
+            }
+            throw err;
+        }
+    }
+    
+    async function initialize() {
+        // 检查认证状态
+        const authenticated = await checkAuth();
+        if (!authenticated) {
+            return;
+        }
+        
         // 将数据加载器挂载到全局，方便惰性调用
         window.pageLoaders = { posts: loadPosts, categories: loadCategories, tags: loadTags, links: loadLinks, settings: loadSettings, images: loadImages, comments: loadComments, ipBlacklist: loadIpBlacklist };
         
@@ -733,8 +865,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pages.categories.innerHTML = `<h2>分类管理</h2><div class="table-container"><table id="categories-table" aria-busy="true"></table></div>`;
         pages.tags.innerHTML = `<h2>标签管理</h2><div class="table-container"><table id="tags-table" aria-busy="true"></table></div>`;
         pages.links.innerHTML = `<h2>友链管理</h2><form id="link-form" aria-busy="false"><input type="hidden" id="linkId"><div class="grid"><input type="text" id="link-name" placeholder="网站名称" required><input type="url" id="link-url" placeholder="网站链接 (https://...)" required></div><button type="submit">保存友链</button></form><hr><h3>友链列表</h3><div id="links-list" aria-busy="true"></div>`;
-        pages.settings.innerHTML = `<h2>网站设置</h2><form id="settings-form" aria-busy="false"><label for="blog_title">网站主标题</label><input type="text" id="blog_title" name="blog_title" placeholder="例如：我的博客"><label for="site_url">网站域名</label><input type="url" id="site_url" name="site_url" placeholder="例如：https://blog.example.com"><label for="subtitle">博客副标题</label><input type="text" id="subtitle" name="subtitle" placeholder="例如：记录生活与技术"><button type="submit">保存设置</button></form>`;
-        pages.tools.innerHTML = `<article><header><strong>重建所有静态页面</strong></header><p>当您进行了批量修改（如重命名分类/标签）或修改了页面模板后，静态页面不会自动更新。请在此处手动触发一次全站重建。</p><footer><button id="rebuild-all-btn" class="contrast" aria-busy="false">开始重建</button></footer></article>`;
+        pages.settings.innerHTML = `<h2>网站设置</h2><form id="settings-form" aria-busy="false"><label for="blog_title">网站主标题</label><input type="text" id="blog_title" name="blog_title" placeholder="例如：我的博客"><label for="site_url">网站域名</label><input type="url" id="site_url" name="site_url" placeholder="例如：https://blog.example.com"><label for="subtitle">博客副标题</label><input type="text" id="subtitle" name="subtitle" placeholder="例如：记录生活与技术"><button type="submit">保存设置</button></form><hr><h2>管理员设置</h2><form id="admin-settings-form" aria-busy="false"><label for="admin_username">用户名</label><input type="text" id="admin_username" name="admin_username" placeholder="输入新用户名"><label for="admin_password">密码</label><input type="password" id="admin_password" name="admin_password" placeholder="输入新密码"><label for="admin_password_confirm">确认密码</label><input type="password" id="admin_password_confirm" name="admin_password_confirm" placeholder="再次输入新密码"><button type="submit">保存管理员设置</button></form>`;
+        pages.tools.innerHTML = `<article><header><strong>重建所有静态页面</strong></header><p>当您进行了批量修改（如重命名分类/标签）或修改了页面模板后，静态页面不会自动更新。请在此处手动触发一次全站重建。</p><footer><button id="rebuild-all-btn" class="contrast" aria-busy="false">开始重建</button></footer></article><article style="margin-top: 2rem;"><header><strong>数据备份与恢复</strong></header><p>定期备份您的数据以防止数据丢失。您可以下载备份文件并在需要时恢复数据。</p><footer><button id="backup-btn" class="contrast">下载备份</button><input type="file" id="restore-file" accept=".json" style="display: none;"><button id="restore-btn" class="secondary">上传恢复</button></footer></article>`;
         
         pages.images.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -765,6 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.target.matches('#post-form')) handlePostSubmit(e);
             if (e.target.matches('#link-form')) handleLinkSubmit(e);
             if (e.target.matches('#settings-form')) handleSettingsSubmit(e);
+            if (e.target.matches('#admin-settings-form')) handleAdminSettingsSubmit(e);
         });
         document.body.addEventListener('click', (e) => {
             const target = e.target;
@@ -776,12 +909,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 document.getElementById('image-file-input').click();
             }
+            if (target.matches('#rebuild-all-btn')) handleRebuild(e);
+            if (target.matches('#backup-btn')) handleBackup(e);
+            if (target.matches('#restore-btn')) handleRestoreClick(e);
             // 使用 .closest() 来确保即使点击了按钮内部的元素也能正确委托
             if (target.closest('#posts-list')) handlePostListClick(e);
             if (target.closest('#categories-table')) handleCategoryListClick(e);
             if (target.closest('#tags-table')) handleTagListClick(e);
             if (target.closest('#links-list')) handleLinkListClick(e);
-            if (target.matches('#rebuild-all-btn')) handleRebuild(e);
+        });
+        
+        // 为文件输入框添加事件监听器
+        document.body.addEventListener('change', (e) => {
+            if (e.target.matches('#restore-file')) {
+                handleRestoreFile(e);
+            }
         });
 
         // 图片上传处理

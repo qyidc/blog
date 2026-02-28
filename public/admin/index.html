@@ -134,12 +134,38 @@
                     
                     <button type="submit">保存设置</button>
                 </form>
+                
+                <hr>
+                
+                <h2>管理员设置</h2>
+                <form id="admin-settings-form" aria-busy="false">
+                    <label for="admin_username">用户名</label>
+                    <input type="text" id="admin_username" name="admin_username" placeholder="输入新用户名">
+                    
+                    <label for="admin_password">密码</label>
+                    <input type="password" id="admin_password" name="admin_password" placeholder="输入新密码">
+                    
+                    <label for="admin_password_confirm">确认密码</label>
+                    <input type="password" id="admin_password_confirm" name="admin_password_confirm" placeholder="再次输入新密码">
+                    
+                    <button type="submit">保存管理员设置</button>
+                </form>
             </section>
             <section id="tools-page" class="page">
                 <article>
                     <header><strong>重建所有静态页面</strong></header>
                     <p>当您进行了批量修改（如重命名分类/标签）或修改了页面模板后，静态页面不会自动更新。请在此处手动触发一次全站重建。</p>
                     <footer><button id="rebuild-all-btn" class="contrast" aria-busy="false">开始重建</button></footer>
+                </article>
+                
+                <article style="margin-top: 2rem;">
+                    <header><strong>数据备份与恢复</strong></header>
+                    <p>定期备份您的数据以防止数据丢失。您可以下载备份文件并在需要时恢复数据。</p>
+                    <footer>
+                        <button id="backup-btn" class="contrast">下载备份</button>
+                        <input type="file" id="restore-file" accept=".json" style="display: none;">
+                        <button id="restore-btn" class="secondary">上传恢复</button>
+                    </footer>
                 </article>
             </section>
         </main>
