@@ -1,0 +1,40 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ["./src/**/*.ts",],
+  safelist: [
+    'bg-slate-100',
+    'flex',
+    'items-center',
+    'justify-center',
+    'h-screen',
+    'max-w-md',
+    'w-full',
+    'bg-white',
+    'p-8',
+    'rounded-lg',
+    'shadow-2xl',
+    'text-center',
+    'text-3xl',
+    'font-bold',
+    'text-sky-600',
+    'mb-4',
+    'text-slate-700',
+    'text-green-600',
+    'min-h-[10vh]',
+    'min-h-[20vh]',
+    'min-h-[30vh]',
+    'min-h-[40vh]',
+    'min-h-[50vh]',
+    'min-h-[60vh]',
+    'min-h-[70vh]',
+    'md:min-h-[30vh]',
+    'md:min-h-[40vh]',
+    'md:min-h-[50vh]',
+    'md:min-h-[60vh]'
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+

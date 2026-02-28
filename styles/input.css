@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 你可以在这里添加一些自定义的全局样式 */
+body {
+  @apply bg-slate-50 text-slate-800; /* 应用背景和文字颜色 */
+}

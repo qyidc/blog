@@ -1,0 +1,32 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "deepautoblog",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-06-13",
+	"compatibility_flags": [
+		"global_fetch_strictly_public"
+	],
+	"vars": {
+		"BLOG_TITLE": "记忆碎片"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "cf_blog-db",
+			"database_id": "YOUR_DATABASE_ID_HERE"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "STATIC_PAGES",
+			"bucket_name": "cfblog-pages"
+		},
+		{
+			"binding": "ASSETS",
+			"bucket_name": "cfblog-assets"
+		}
+	]
+}

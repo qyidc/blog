@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>博客管理后台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
+    
+    <style>
+        :root { --pico-font-size: 100%; }
+        html, body { height: 100%; margin: 0; background-color: var(--pico-secondary-background); }
+        .app-container { display: flex; height: 100%; }
+        .app-sidebar { flex: 0 0 260px; padding: 1.5rem; background-color: var(--pico-card-background-color); border-right: 1px solid var(--pico-card-border-color); overflow-y: auto; }
+        .app-main { flex-grow: 1; padding: 1.5rem 2.5rem; overflow-y: auto; }
+        .app-sidebar nav ul { list-style: none; padding: 0; }
+        .app-sidebar nav a { display: block; padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-radius: 6px; font-weight: 500; text-decoration: none; color: var(--pico-contrast); }
+        .app-sidebar nav a.active { background-color: var(--pico-primary); color: var(--pico-primary-inverse); }
+        .app-sidebar nav a:not(.active):hover { background-color: var(--pico-muted-background-color); }
+        .page { display: none; }
+        .page.active { display: block; }
+        .EasyMDEContainer { border-color: var(--pico-form-element-border-color); }
+        #posts-list article, #links-list article { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--pico-card-border-color); border-radius: 6px; }
+        #posts-list article footer, #links-list article footer { padding-top: 1rem; }
+        .table-container { max-height: 70vh; overflow-y: auto; }
+        table button { margin: 0 0.25rem; padding: 0.25rem 0.5rem; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="app-sidebar">
+            <nav>
+                <h3 style="margin-top:0; padding: 0 1rem;">内容管理</h3>
+                <ul>
+                    <li><a href="#posts" class="nav-link" data-page="posts-page">文章管理</a></li>
+                    <li><a href="#categories" class="nav-link" data-page="categories-page">分类管理</a></li>
+                    <li><a href="#tags" class="nav-link" data-page="tags-page">标签管理</a></li>
+                    <li><a href="#links" class="nav-link" data-page="links-page">友链管理</a></li>
+                    <li><a href="#images" class="nav-link" data-page="images-page">图片管理</a></li>
+                    <li><a href="#comments" class="nav-link" data-page="comments-page">评论管理</a></li>
+                    <li><a href="#ip-blacklist" class="nav-link" data-page="ipBlacklist-page">IP黑名单</a></li>
+                </ul>
+                <h3 style="margin-top:2rem; padding: 0 1rem;">系统</h3>
+                <ul>
+                    <li><a href="#settings" class="nav-link" data-page="settings-page">网站设置</a></li>
+                    <li><a href="#tools" class="nav-link" data-page="tools-page">系统工具</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="app-main">
+            <section id="posts-page" class="page">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2>文章管理</h2><button id="show-post-form-btn">撰写新文章</button>
+                </div>
+                <!-- 统计面板 -->
+                <div id="statistics-panel" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem;" class="mb-6">
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #0ea5e9;">
+                        <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">总文章数</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-total-posts">0</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #10b981;">
+                        <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">已发布</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-published">0</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b;">
+                        <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">草稿</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-drafts">0</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #8b5cf6;">
+                        <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">总评论数</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-comments">0</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #ef4444;">
+                        <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">待审核评论</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-pending">0</div>
+                    </div>
+                    <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #ec4899;">
+                        <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">总阅读量</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-views">0</div>
+                    </div>
+                </div>
+                <div id="posts-list-section"><div id="posts-list" aria-busy="true"></div></div>
+                <div id="post-form-section" style="display: none;">
+                    <form id="post-form" aria-busy="false">
+                        <h3 id="form-title">撰写新文章</h3>
+                        <input type="text" id="post-title" placeholder="文章标题" required>
+                        <textarea id="post-content"></textarea>
+                        <label for="post-category">分类</label>
+                        <input type="text" id="post-category" placeholder="选择或输入新分类" list="category-list"><datalist id="category-list"></datalist>
+                        <label for="post-tags">标签 (英文逗号分隔)</label>
+                        <input type="text" id="post-tags" placeholder="例如：cloudflare,d1,r2">
+                        <label for="post-feature_image">特色图片链接</label>
+                        <input type="url" id="post-feature_image" placeholder="https://example.com/image.jpg">
+                        <label><input type="checkbox" id="post-is_published" name="is_published" checked>发布</label>
+                        <div class="grid"><button type="submit">保存文章</button><button type="button" id="cancel-post-form-btn" class="secondary">取消</button></div>
+                    </form>
+                </div>
+            </section>
+            <section id="categories-page" class="page">
+                <h2>分类管理</h2><div class="table-container"><table id="categories-table" aria-busy="true"></table></div>
+            </section>
+            <section id="tags-page" class="page">
+                <h2>标签管理</h2><div class="table-container"><table id="tags-table" aria-busy="true"></table></div>
+            </section>
+            <section id="links-page" class="page">
+                <h2>友链管理</h2>
+                <form id="link-form" aria-busy="false"><input type="hidden" id="linkId"><div class="grid"><input type="text" id="link-name" placeholder="网站名称" required><input type="url" id="link-url" placeholder="网站链接 (https://...)" required></div><button type="submit">保存友链</button></form>
+                <hr><h3>友链列表</h3><div id="links-list" aria-busy="true"></div>
+            </section>
+            <section id="images-page" class="page">
+                <h2>图片管理</h2>
+                <div id="images-list" aria-busy="true"></div>
+            </section>
+            <section id="comments-page" class="page">
+                <h2>评论管理</h2>
+                <div class="table-container"><table id="comments-table" aria-busy="true"></table></div>
+            </section>
+            <section id="ip-blacklist-page" class="page">
+                <h2>IP黑名单</h2>
+                <div class="table-container"><table id="ip-blacklist-table" aria-busy="true"></table></div>
+            </section>
+            <section id="settings-page" class="page">
+                <h2>网站设置</h2>
+                <form id="settings-form" aria-busy="false">
+                    <label for="blog_title">网站主标题</label>
+                    <input type="text" id="blog_title" name="blog_title" placeholder="例如：我的博客">
+                    
+                    <label for="site_url">网站域名</label>
+                    <input type="url" id="site_url" name="site_url" placeholder="例如：https://blog.example.com">
+                    
+                    <label for="subtitle">博客副标题</label>
+                    <input type="text" id="subtitle" name="subtitle" placeholder="例如：记录生活与技术">
+                    
+                    <button type="submit">保存设置</button>
+                </form>
+            </section>
+            <section id="tools-page" class="page">
+                <article>
+                    <header><strong>重建所有静态页面</strong></header>
+                    <p>当您进行了批量修改（如重命名分类/标签）或修改了页面模板后，静态页面不会自动更新。请在此处手动触发一次全站重建。</p>
+                    <footer><button id="rebuild-all-btn" class="contrast" aria-busy="false">开始重建</button></footer>
+                </article>
+            </section>
+        </main>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+    <script src="/admin/app.js" defer></script>
+</body>
+</html>
