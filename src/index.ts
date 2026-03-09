@@ -82,7 +82,7 @@ const app = new Hono<Env>();
 // 站点地图 sitemap.xml
 app.get('/sitemap.xml', async (c) => {
     const { results: posts } = await c.env.DB.prepare(
-        "SELECT slug, published_at FROM posts WHERE is_published = 1 AND is_draft = 0"
+        "SELECT slug, published_at FROM posts WHERE is_published = 1"
     ).all<{ slug: string, published_at: string }>();
 
     // 从设置表读取域名
