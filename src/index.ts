@@ -1461,7 +1461,7 @@ async function generateUniqueSlug(db: D1Database, title: string, excludeId?: str
  * @param env - 环境变量，包含 DB 和 STATIC_PAGES
  * @param post - 文章对象
  */
-async function generateAndStoreStaticPage(env: any, post: Post) {
+async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
     // 1. 数据准备
     const bodyHtml = await marked.parse(post.content);
     const publishedAt = post.published_at || new Date().toISOString();
