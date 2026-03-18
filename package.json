@@ -24,6 +24,7 @@
 	"dependencies": {
 		"hono": "^4.7.11",
 		"marked": "^15.0.12",
+		"pinyin": "^4.0.0",
 		"sitemap": "^8.0.0"
 	}
 }

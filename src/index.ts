@@ -1,6 +1,7 @@
 import { Hono, Context, Next } from 'hono';
 import { cors } from 'hono/cors';
 import { marked } from 'marked';
+import pinyin from 'pinyin';
 
 // --- 1. 类型定义 ---
 export interface Env {
@@ -1434,12 +1435,22 @@ async function generateUniqueSlug(db: D1Database, title: string, excludeId?: str
         .replace(/-{2,}/g, '-')         // 替换连续的连字符为单个连字符
         .replace(/^-|-$/g, '');          // 移除首尾的连字符
 
-    // 2. 确保 slug 不为空
+    // 2. 将中文转换为拼音
+    if (/[\u4e00-\u9fa5]/.test(slug)) {
+        const pinyinArray = pinyin(slug, {
+            style: pinyin.STYLE_NORMAL,
+            heteronym: false,
+            segment: false
+        });
+        slug = pinyinArray.map(item => item[0]).join('-');
+    }
+
+    // 3. 确保 slug 不为空
     if (!slug) {
         slug = 'post';
     }
 
-    // 3. 检查并处理重复
+    // 4. 检查并处理重复
     let suffix = 1;
     let baseSlug = slug;
     
