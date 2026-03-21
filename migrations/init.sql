@@ -31,6 +31,20 @@ CREATE TABLE IF NOT EXISTS images (
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE SET NULL
 );
 
+-- 附件管理表
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL UNIQUE,
+    file_size INTEGER NOT NULL,
+    file_type TEXT NOT NULL,
+    upload_at TEXT NOT NULL,
+    post_id TEXT,
+    download_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE SET NULL
+);
+
 -- 评论表
 CREATE TABLE IF NOT EXISTS comments (
     id TEXT PRIMARY KEY,
@@ -87,6 +101,9 @@ CREATE INDEX IF NOT EXISTS idx_posts_pinned ON posts(is_pinned DESC, published_a
 
 CREATE INDEX IF NOT EXISTS idx_images_post_id ON images(post_id);
 CREATE INDEX IF NOT EXISTS idx_images_upload_at ON images(upload_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_post_id ON attachments(post_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_upload_at ON attachments(upload_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at DESC);

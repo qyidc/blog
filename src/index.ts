@@ -1231,6 +1231,127 @@ api.delete('/images/:id', async (c) => {
     return c.json({ success: true });
 });
 
+// 附件管理 API
+api.get('/attachments', async (c) => {
+    try {
+        const url = new URL(c.req.url);
+        const page = parseInt(url.searchParams.get('page') || '1', 10);
+        const pageSize = 20;
+        const offset = (page - 1) * pageSize;
+        
+        const [countResult, attachmentsResult] = await Promise.all([
+            c.env.DB.prepare('SELECT COUNT(*) as total FROM attachments').first<{ total: number }>(),
+            c.env.DB.prepare(
+                'SELECT * FROM attachments ORDER BY upload_at DESC LIMIT ? OFFSET ?'
+            ).bind(pageSize, offset).all()
+        ]);
+        
+        const total = countResult?.total || 0;
+        const totalPages = Math.ceil(total / pageSize);
+        
+        const attachments = attachmentsResult?.results || [];
+        
+        return c.json({
+            data: attachments.map((att: any) => ({
+                ...att,
+                url: `https://${c.req.header('host') || 'blog.otwx.top'}/${att.file_path}`,
+                file_size_formatted: att.file_size ? formatFileSize(att.file_size) : '0 B'
+            })),
+            pagination: {
+                page,
+                pageSize,
+                total,
+                totalPages
+            }
+        });
+    } catch (e) {
+        console.error('获取附件列表失败:', e);
+        return c.json({ error: '获取附件列表失败' }, 500);
+    }
+});
+
+// 附件上传 API
+api.post('/upload-attachment', async (c) => {
+    try {
+        const formData = await c.req.formData();
+        const file = formData.get('file') as File || formData.get('attachment') as File;
+        
+        if (!file) {
+            return c.json({ error: 'No file provided' }, 400);
+        }
+        
+        const postId = formData.get('post_id') as string || null;
+        
+        const timestamp = Date.now();
+        const randomId = crypto.randomUUID().slice(0, 8);
+        const extension = file.name.split('.').pop();
+        const fileName = `${timestamp}-${randomId}.${extension}`;
+        const filePath = `assets/attachments/${fileName}`;
+        
+        const buffer = await file.arrayBuffer();
+        
+        await c.env.ASSETS.put(filePath, buffer, {
+            httpMetadata: {
+                contentType: file.type
+            }
+        });
+        
+        const id = crypto.randomUUID();
+        await c.env.DB.prepare(
+            'INSERT INTO attachments (id, file_name, file_path, file_size, file_type, upload_at, post_id, download_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, datetime(\'now\'))'
+        ).bind(id, file.name, filePath, file.size, file.type, new Date().toISOString(), postId).run();
+        
+        const attachmentUrl = `https://${c.req.header('host') || 'blog.otwx.top'}/${filePath}`;
+        return c.json({ success: true, url: attachmentUrl, id: id, file_name: file.name });
+    } catch (error) {
+        console.error('上传附件失败:', error);
+        return c.json({ error: '上传失败，请稍后再试' }, 500);
+    }
+});
+
+// 附件删除 API
+api.delete('/attachments/:id', async (c) => {
+    const id = c.req.param('id');
+    
+    const attachment = await c.env.DB.prepare('SELECT file_path FROM attachments WHERE id = ?').bind(id).first<{ file_path: string }>();
+    if (!attachment) return c.json({ error: 'Attachment not found' }, 404);
+    
+    await c.env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(id).run();
+    
+    try {
+        await c.env.ASSETS.delete(attachment.file_path);
+    } catch (e) {
+        console.error('删除附件失败:', e);
+    }
+    
+    return c.json({ success: true });
+});
+
+// 附件下载 API (公共API)
+app.get('/attachments/:id/download', async (c) => {
+    const id = c.req.param('id');
+    
+    const attachment = await c.env.DB.prepare('SELECT * FROM attachments WHERE id = ?').bind(id).first<{ file_path: string; file_name: string }>();
+    if (!attachment) return c.text('附件未找到', 404);
+    
+    try {
+        const object = await c.env.ASSETS.get(attachment.file_path);
+        if (object === null) return c.text('附件文件未找到', 404);
+        
+        await c.env.DB.prepare('UPDATE attachments SET download_count = download_count + 1 WHERE id = ?').bind(id).run();
+        
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set('etag', object.httpEtag);
+        headers.set('Content-Disposition', `attachment; filename="${attachment.file_name}"`);
+        
+        return new Response(object.body, { headers });
+    } catch (e: any) {
+        console.error('获取附件失败:', e);
+        return c.text('获取附件失败', 500);
+    }
+});
+
 // IP 黑名单管理 API
 api.get('/ip-blacklist', async (c) => {
     const url = new URL(c.req.url);
@@ -1637,6 +1758,20 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
         });
     `;
 
+    const tagsHtml = post.tags ? (() => {
+        const tags = JSON.parse(post.tags);
+        const maxTags = 10;
+        const tagsToShow = tags.slice(0, maxTags);
+        const tagsLinks = tagsToShow.map((tag: string) => `<a href="/tags/${tag}" class="text-sm text-sky-600 hover:underline">${tag}</a>`).join(', ');
+        const moreHtml = tags.length > maxTags ? `<span class="text-sm text-slate-500">等${tags.length}个标签</span>` : '';
+        return `
+    <div class="py-4 border-t border-slate-100 flex flex-wrap gap-2 mb-6">
+        <span class="text-sm font-medium text-slate-500">标签:</span>
+        ${tagsLinks}${moreHtml}
+    </div>
+    `;
+    })() : '';
+
     const htmlContent = `
     <!DOCTYPE html>
     <html lang="zh-CN" class="scroll-smooth">
@@ -1701,12 +1836,7 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
                             </div>
 
                             <!-- 标签 -->
-                            ${post.tags ? `
-                            <div class="py-4 border-t border-slate-100 flex flex-wrap gap-2 mb-6">
-                                <span class="text-sm font-medium text-slate-500">标签:</span>
-                                ${JSON.parse(post.tags).map((tag: string) => `<a href="/tags/${tag}" class="text-sm text-sky-600 hover:underline">${tag}</a>`).join(', ')}
-                            </div>
-                            ` : ''}
+                            ${tagsHtml}
 
                             <!-- 上下篇导航 -->
                             <div class="py-4 border-t border-slate-100 flex justify-between">
@@ -2004,13 +2134,21 @@ async function renderHomePage(data: {
                     const tagList = document.getElementById('tags-list');
                     tagList.innerHTML = '';
                     if (data.tags && data.tags.length > 0) {
-                        data.tags.forEach(t => {
+                        const maxTags = 30;
+                        const tagsToShow = data.tags.slice(0, maxTags);
+                        tagsToShow.forEach(t => {
                             const a = document.createElement('a');
                             a.href = \`/tags/\${t.tag}\`;
                             a.className = 'inline-flex items-center bg-slate-100 text-slate-700 px-3 py-1 rounded-full text-sm hover:bg-sky-100 hover:text-sky-800 transition-colors';
                             a.innerHTML = \`\${ICONS.tag} \${t.tag}\`;
                             tagList.appendChild(a);
                         });
+                        if (data.tags.length > maxTags) {
+                            const moreSpan = document.createElement('span');
+                            moreSpan.className = 'text-sm text-slate-500 px-2';
+                            moreSpan.textContent = \`+ \${data.tags.length - maxTags}\`;
+                            tagList.appendChild(moreSpan);
+                        }
                     } else { tagList.innerHTML = '<p>暂无标签</p>'; }
 
                     const linkList = document.getElementById('links-list');

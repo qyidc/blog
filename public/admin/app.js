@@ -198,6 +198,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentImagesPage = 1;
     let imagesPagination = null;
+    let currentAttachmentsPage = 1;
+    let attachmentsPagination = null;
 
     async function loadImages(page = 1) {
         const listEl = document.getElementById('images-list');
@@ -321,6 +323,130 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 挂载到全局
     window.loadImages = loadImages;
+
+    // 附件管理
+    async function loadAttachments(page = 1) {
+        const listEl = document.getElementById('attachments-list');
+        const paginationEl = document.getElementById('attachments-pagination');
+        
+        if(!listEl) return;
+        listEl.setAttribute('aria-busy', 'true');
+        
+        try {
+            const result = await apiRequest(`/attachments?page=${page}&pageSize=12`);
+            const attachments = result.data;
+            attachmentsPagination = result.pagination;
+            currentAttachmentsPage = page;
+            
+            if (attachments.length === 0) {
+                listEl.innerHTML = '<p style="grid-column: 1 / -1; text-align: center;">暂无附件，去文章编辑页上传第一个附件吧！</p>';
+                if (paginationEl) paginationEl.innerHTML = '';
+            } else {
+                listEl.innerHTML = attachments.map(att => `
+                    <div class="attachment-card" style="border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 1rem;">
+                        <div style="display: flex; align-items: center; margin-bottom: 0.75rem;">
+                            <div style="width: 48px; height: 48px; background: #f1f5f9; border-radius: 0.5rem; display: flex; align-items: center; justify-content: center; margin-right: 1rem;">
+                                <span style="font-size: 1.5rem;">📎</span>
+                            </div>
+                            <div style="flex: 1; min-width: 0;">
+                                <p style="font-size: 0.875rem; margin-bottom: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" 
+                                   title="${att.file_name}">${att.file_name}</p>
+                                <div style="font-size: 0.75rem; color: #64748b;">
+                                    <span>${att.file_size_formatted}</span>
+                                    <span style="margin: 0 0.5rem;">|</span>
+                                    <span>${new Date(att.upload_at).toLocaleString('zh-CN')}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div style="background: #f8fafc; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.75rem; font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace;" 
+                             title="[📎 ${att.file_name}](/attachments/${att.id}/download)">
+                            [📎 ${att.file_name.length > 15 ? att.file_name.slice(0,15) + '...' : att.file_name}](/attachments/${att.id}/download)
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="font-size: 0.75rem; color: #64748b;">
+                                下载次数: <strong>${att.download_count || 0}</strong>
+                            </div>
+                            <div style="display: flex; gap: 0.25rem;">
+                                <button class="secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" 
+                                        onclick="copyAttachmentMarkdown('${att.id}', '${att.file_name}')">
+                                    复制代码
+                                </button>
+                                <button class="secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" 
+                                        onclick="downloadAttachment('${att.id}')">
+                                    下载
+                                </button>
+                                <button class="delete-btn secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" 
+                                        onclick="deleteAttachment('${att.id}', '${att.file_name}')">
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                // 生成分页HTML
+                if (paginationEl && attachmentsPagination.totalPages > 1) {
+                    let paginationHtml = `<div style="display: flex; gap: 0.5rem; justify-content: center; margin-top: 1rem;">
+                        <button ${currentAttachmentsPage <= 1 ? 'disabled' : ''} class="secondary" onclick="loadAttachments(${currentAttachmentsPage - 1})">上一页</button>
+                        <span>第 ${currentAttachmentsPage} / ${attachmentsPagination.totalPages} 页 (共 ${attachmentsPagination.total} 个)</span>
+                        <button ${currentAttachmentsPage >= attachmentsPagination.totalPages ? 'disabled' : ''} onclick="loadAttachments(${currentAttachmentsPage + 1})">下一页</button>
+                    </div>`;
+                    paginationEl.innerHTML = paginationHtml;
+                }
+            }
+        } catch(e) { 
+            listEl.innerHTML = `<p style="grid-column: 1 / -1; text-align: center; color:red">加载附件失败: ${e.message}</p>`; 
+        } finally { 
+            listEl.setAttribute('aria-busy', 'false'); 
+        }
+    }
+
+    // 复制附件Markdown代码
+    window.copyAttachmentMarkdown = async (id, fileName) => {
+        const markdown = `[📎 ${fileName}](/attachments/${id}/download)`;
+        try {
+            await navigator.clipboard.writeText(markdown);
+            alert('Markdown代码已复制到剪贴板！');
+        } catch (err) {
+            // 降级方案
+            const textarea = document.createElement('textarea');
+            textarea.value = markdown;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                alert('Markdown代码已复制到剪贴板！');
+            } catch (e) {
+                alert('复制失败，请手动复制');
+            }
+            document.body.removeChild(textarea);
+        }
+    };
+
+    // 下载附件
+    window.downloadAttachment = (id) => {
+        window.open(`/attachments/${id}/download`, '_blank');
+    };
+
+    // 删除附件
+    window.deleteAttachment = async (id, fileName) => {
+        if (!confirm(`确定要删除附件 "${fileName}" 吗？此操作不可恢复。`)) return;
+        
+        try {
+            await apiRequest(`/attachments/${id}`, 'DELETE');
+            alert('附件删除成功！');
+            loadAttachments(currentAttachmentsPage);
+        } catch (err) {
+            alert(`删除失败: ${err.message}`);
+        }
+    };
+
+    // 挂载到全局
+    window.loadAttachments = loadAttachments;
 
     // 评论管理
     let currentCommentsPage = 1;
@@ -698,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 4. 总初始化函数 ---
     function initialize() {
         // 将数据加载器挂载到全局，方便惰性调用
-        window.pageLoaders = { posts: loadPosts, categories: loadCategories, tags: loadTags, links: loadLinks, settings: loadSettings, images: loadImages, comments: loadComments, ipBlacklist: loadIpBlacklist };
+        window.pageLoaders = { posts: loadPosts, categories: loadCategories, tags: loadTags, links: loadLinks, settings: loadSettings, images: loadImages, attachments: loadAttachments, comments: loadComments, ipBlacklist: loadIpBlacklist };
         
         // 渲染所有UI骨架
         pages.posts.innerHTML = `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;"><h2>文章管理</h2><button id="show-post-form-btn">撰写新文章</button></div>
@@ -729,7 +855,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="stat-views">0</div>
     </div>
 </div>
-<div id="posts-list-section"><div id="posts-list" aria-busy="true"></div><div id="posts-pagination"></div></div><div id="post-form-section" style="display: none;"><form id="post-form" aria-busy="false"><h3 id="form-title">撰写新文章</h3><input type="text" id="post-title" placeholder="文章标题" required><div style="margin-bottom: 1rem;"><button type="button" id="upload-image-btn" style="margin-bottom: 0.5rem;">📷 上传图片</button><input type="file" id="image-file-input" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;"></div><textarea id="post-content"></textarea><label for="post-category">分类</label><input type="text" id="post-category" placeholder="选择或输入新分类" list="category-list"><datalist id="category-list"></datalist><label for="post-tags">标签 (英文逗号分隔)</label><input type="text" id="post-tags" placeholder="例如：cloudflare,d1,r2"><label for="post-feature_image">特色图片链接</label><input type="text" id="post-feature_image" placeholder="https://example.com/image.jpg 或相对路径"><div style="display: flex; gap: 1rem; align-items: center;"><label><input type="checkbox" id="post-is_published" name="is_published" checked>发布</label><label><input type="checkbox" id="post-is_pinned" name="is_pinned">置顶</label></div><div class="grid"><button type="submit">保存文章</button><button type="button" id="save-draft-btn" class="secondary">保存为草稿</button><button type="button" id="cancel-post-form-btn" class="secondary">取消</button></div></form></div>`;
+<div id="posts-list-section"><div id="posts-list" aria-busy="true"></div><div id="posts-pagination"></div></div><div id="post-form-section" style="display: none;"><form id="post-form" aria-busy="false"><h3 id="form-title">撰写新文章</h3><input type="text" id="post-title" placeholder="文章标题" required><div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;"><button type="button" id="upload-image-btn" style="margin-bottom: 0.5rem;">📷 上传图片</button><button type="button" id="upload-attachment-btn" style="margin-bottom: 0.5rem;">📎 上传附件</button><input type="file" id="image-file-input" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp" style="display: none;"><input type="file" id="attachment-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.txt,.md" style="display: none;"></div><textarea id="post-content"></textarea><label for="post-category">分类</label><input type="text" id="post-category" placeholder="选择或输入新分类" list="category-list"><datalist id="category-list"></datalist><label for="post-tags">标签 (英文逗号分隔)</label><input type="text" id="post-tags" placeholder="例如：cloudflare,d1,r2"><label for="post-feature_image">特色图片链接</label><input type="text" id="post-feature_image" placeholder="https://example.com/image.jpg 或相对路径"><div style="display: flex; gap: 1rem; align-items: center;"><label><input type="checkbox" id="post-is_published" name="is_published" checked>发布</label><label><input type="checkbox" id="post-is_pinned" name="is_pinned">置顶</label></div><div class="grid"><button type="submit">保存文章</button><button type="button" id="save-draft-btn" class="secondary">保存为草稿</button><button type="button" id="cancel-post-form-btn" class="secondary">取消</button></div></form></div>`;
         pages.categories.innerHTML = `<h2>分类管理</h2><div class="table-container"><table id="categories-table" aria-busy="true"></table></div>`;
         pages.tags.innerHTML = `<h2>标签管理</h2><div class="table-container"><table id="tags-table" aria-busy="true"></table></div>`;
         pages.links.innerHTML = `<h2>友链管理</h2><form id="link-form" aria-busy="false"><input type="hidden" id="linkId"><div class="grid"><input type="text" id="link-name" placeholder="网站名称" required><input type="url" id="link-url" placeholder="网站链接 (https://...)" required></div><button type="submit">保存友链</button></form><hr><h3>友链列表</h3><div id="links-list" aria-busy="true"></div>`;
@@ -742,6 +868,15 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <div id="images-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; min-height: 400px;" aria-busy="true"></div>
             <div id="images-pagination"></div>
+        `;
+        
+        pages.attachments = document.getElementById('attachments-page');
+        pages.attachments.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2>附件管理</h2>
+            </div>
+            <div id="attachments-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; min-height: 400px;" aria-busy="true"></div>
+            <div id="attachments-pagination"></div>
         `;
         
         // 全局图片预览弹窗
@@ -775,6 +910,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (target.matches('#upload-image-btn')) {
                 e.preventDefault();
                 document.getElementById('image-file-input').click();
+            }
+            if (target.matches('#upload-attachment-btn')) {
+                e.preventDefault();
+                document.getElementById('attachment-file-input').click();
             }
             // 使用 .closest() 来确保即使点击了按钮内部的元素也能正确委托
             if (target.closest('#posts-list')) handlePostListClick(e);
@@ -816,6 +955,44 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } catch (err) {
                     alert(`图片上传失败: ${err.message}`);
+                } finally {
+                    uploadBtn.textContent = originalText;
+                    uploadBtn.disabled = false;
+                    target.value = ''; // 重置文件输入
+                }
+            }
+            if (target.matches('#attachment-file-input')) {
+                const file = target.files[0];
+                if (!file) return;
+                
+                const uploadBtn = document.getElementById('upload-attachment-btn');
+                const originalText = uploadBtn.textContent;
+                uploadBtn.textContent = '上传中...';
+                uploadBtn.disabled = true;
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    if (currentPostId) {
+                        formData.append('post_id', currentPostId);
+                    }
+                    
+                    const response = await apiRequest('/upload-attachment', 'POST', formData, false);
+                    if (response.success && response.url) {
+                        // 插入Markdown格式附件链接到编辑器
+                        const attachmentMarkdown = `[📎 ${response.file_name}](/attachments/${response.id}/download)`;
+                        const editor = easyMDE;
+                        const cm = editor.codemirror;
+                        const cursor = cm.getCursor();
+                        cm.replaceRange(attachmentMarkdown, cursor);
+                        cm.focus();
+                        cm.setCursor({ line: cursor.line, ch: cursor.ch + attachmentMarkdown.length });
+                        alert('附件上传成功，已插入到编辑器！');
+                    } else {
+                        throw new Error(response.error || '上传失败');
+                    }
+                } catch (err) {
+                    alert(`附件上传失败: ${err.message}`);
                 } finally {
                     uploadBtn.textContent = originalText;
                     uploadBtn.disabled = false;
