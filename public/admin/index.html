@@ -10,7 +10,7 @@
     <style>
         :root { --pico-font-size: 100%; }
         html, body { height: 100%; margin: 0; background-color: var(--pico-secondary-background); }
-        .app-container { display: flex; height: 100%; }
+        .app-container { display: none; height: 100%; }
         .app-sidebar { flex: 0 0 260px; padding: 1.5rem; background-color: var(--pico-card-background-color); border-right: 1px solid var(--pico-card-border-color); overflow-y: auto; }
         .app-main { flex-grow: 1; padding: 1.5rem 2.5rem; overflow-y: auto; }
         .app-sidebar nav ul { list-style: none; padding: 0; }
@@ -24,10 +24,19 @@
         #posts-list article footer, #links-list article footer { padding-top: 1rem; }
         .table-container { max-height: 70vh; overflow-y: auto; }
         table button { margin: 0 0.25rem; padding: 0.25rem 0.5rem; font-size: 0.8em; }
+        #loading-screen { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; width: 100vw; position: fixed; top: 0; left: 0; background-color: var(--pico-secondary-background); z-index: 9999; }
+        #loading-screen .spinner { border: 4px solid var(--pico-muted-color); border-top: 4px solid var(--pico-primary); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 1rem; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div class="app-container">
+    <!-- 加载屏幕 -->
+    <div id="loading-screen">
+        <div class="spinner"></div>
+        <p>正在验证身份...</p>
+    </div>
+    
+    <div class="app-container" style="display: none;">
         <aside class="app-sidebar">
             <nav>
                 <h3 style="margin-top:0; padding: 0 1rem;">内容管理</h3>
@@ -45,6 +54,7 @@
                 <ul>
                     <li><a href="#settings" class="nav-link" data-page="settings-page">网站设置</a></li>
                     <li><a href="#tools" class="nav-link" data-page="tools-page">系统工具</a></li>
+                    <li><a href="#" id="logout-btn" class="nav-link" style="color: #ef4444;">退出登录</a></li>
                 </ul>
             </nav>
         </aside>

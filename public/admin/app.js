@@ -726,6 +726,32 @@ document.addEventListener('DOMContentLoaded', () => {
         catch (err) { alert(`保存草稿失败: ${err.message}`); }
         finally { form.setAttribute('aria-busy', 'false'); }
     }
+    
+    function handleLogout() {
+        if (confirm('确定要退出登录吗？')) {
+            // 立即隐藏后台内容，显示加载屏幕
+            document.getElementById('loading-screen').style.display = 'flex';
+            document.querySelector('.app-container').style.display = 'none';
+            
+            // 清除任何存储的认证信息
+            localStorage.removeItem('admin_credentials_invalid');
+            
+            // 使用同步 XMLHttpRequest 发送带有无效认证的请求
+            // 这会强制浏览器清除存储的认证信息
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open('GET', '/api/statistics', false); // 同步请求
+                xhr.setRequestHeader('Authorization', 'Basic invalid');
+                xhr.send();
+            } catch (e) {
+                // 忽略错误，因为我们期望这个请求失败
+            }
+            
+            // 重定向到 admin 页面，这会触发浏览器的登录对话框
+            location.href = '/admin';
+        }
+    }
+    
     async function handlePostListClick(e) {
         const target = e.target;
         if (target.matches('.edit-btn')) {
@@ -822,7 +848,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 4. 总初始化函数 ---
-    function initialize() {
+    async function initialize() {
+        try {
+            // 验证身份，获取统计数据
+            await apiRequest('/statistics');
+            
+            // 认证成功，显示主容器，隐藏加载屏幕
+            document.getElementById('loading-screen').style.display = 'none';
+            document.querySelector('.app-container').style.display = 'flex';
         // 将数据加载器挂载到全局，方便惰性调用
         window.pageLoaders = { posts: loadPosts, categories: loadCategories, tags: loadTags, links: loadLinks, settings: loadSettings, images: loadImages, attachments: loadAttachments, comments: loadComments, ipBlacklist: loadIpBlacklist };
         
@@ -903,6 +936,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         document.body.addEventListener('click', (e) => {
             const target = e.target;
+            if (target.matches('#logout-btn')) {
+                e.preventDefault();
+                handleLogout();
+            }
             if (target.matches('.nav-link')) { e.preventDefault(); showPage(target.dataset.page.replace('-page', '')); }
             if (target.matches('#show-post-form-btn')) showPostForm('create');
             if (target.matches('#cancel-post-form-btn')) hidePostForm();
@@ -1003,6 +1040,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 加载初始页面
         showPage(window.location.hash.substring(1) || 'posts');
+        } catch (error) {
+            // 认证失败，保持加载屏幕显示
+            console.error('认证失败:', error);
+            document.getElementById('loading-screen').innerHTML = `
+                <div style="text-align: center; padding: 2rem;">
+                    <h3>认证失败</h3>
+                    <p>请刷新页面并重新登录</p>
+                    <button onclick="location.reload()" class="primary" style="margin-top: 1rem;">刷新页面</button>
+                </div>
+            `;
+        }
     }
     
     // 启动应用

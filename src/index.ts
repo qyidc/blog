@@ -386,6 +386,10 @@ app.get('/blog/:slug', async (c) => {
         const headers = new Headers();
         object.writeHttpMetadata(headers);
         headers.set('etag', object.httpEtag);
+        // 禁用缓存，确保总是获取最新内容
+        headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+        headers.set('pragma', 'no-cache');
+        headers.set('expires', '0');
         return new Response(object.body, { headers });
     } catch (e: any) {
         return c.text('获取文章失败', 500);
@@ -567,39 +571,42 @@ app.get('/assets/*', async (c) => {
 
 // --- 5. 受保护的路由组 (需要认证) ---
 const secure = new Hono<Env>();
-secure.use('*', BasicAuth); // 将认证中间件应用到此组的所有路由
 
-// --- 5.1 受保护的后台管理页面 ---
-secure.get('/', (c) => c.redirect('/admin', 301));
-secure.get('', async (c) => {
-    try {
-        const asset = await c.env.ASSETS.get('admin/index.html');
-        if (asset === null) {
-            return c.text('Admin panel not found. Did you upload it to R2?', 404);
-        }
-        const headers = new Headers();
-        asset.writeHttpMetadata(headers);
-        headers.set('content-type', 'text/html; charset=utf-8');
-        return new Response(asset.body, { headers });
-    } catch (e) {
-        console.error('Error serving admin index:', e);
-        return c.text('Error serving admin index', 500);
+// 退出登录路由 - 不需要认证
+secure.get('/logout', async (c) => {
+    // 检查是否有认证信息
+    const authHeader = c.req.header('Authorization');
+    if (authHeader) {
+        // 如果有认证信息，说明用户在登录对话框中输入了凭据
+        // 重定向到 admin 页面
+        return c.redirect('/admin', 302);
     }
+    
+    // 没有认证信息，返回 401 响应，强制浏览器清除认证信息
+    return new Response('Logout successful', {
+        status: 401,
+        headers: { 'WWW-Authenticate': 'Basic realm="Admin Panel"' }
+    });
 });
-secure.get('/*', async (c) => {
+
+// 其他路由需要认证
+secure.use('*', BasicAuth); // 将认证中间件应用到此组的所有其他路由
+secure.get('*', async (c) => {
     try {
         const path = c.req.path.substring(1); // 去掉开头的 '/'
-        const asset = await c.env.ASSETS.get(`admin/${path}`);
+        let assetPath = path === 'admin' ? 'admin/index.html' : `admin/${path}`;
+        
+        const asset = await c.env.ASSETS.get(assetPath);
         if (asset === null) {
             return c.text('Not Found', 404);
         }
         const headers = new Headers();
         asset.writeHttpMetadata(headers);
-        headers.set('etag', asset.httpEtag);
+        headers.set('content-type', assetPath.endsWith('.html') ? 'text/html; charset=utf-8' : asset.httpMetadata?.contentType || 'application/octet-stream');
         return new Response(asset.body, { headers });
     } catch (e) {
         console.error('Error serving admin asset:', e);
-        return c.text('Error serving asset', 500);
+        return c.text('Error serving admin asset', 500);
     }
 });
 
@@ -972,8 +979,9 @@ api.put('/posts/:id', async (c) => {
         const updatedPost = {
             ...originalPost,
             ...updates,
+            content: finalContent,
             tags: updates.tags || originalPost.tags,
-            feature_image: updates.feature_image || originalPost.feature_image
+            feature_image: finalFeatureImage
         };
 
         // 异步更新静态页面
@@ -1922,8 +1930,8 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
     try {
         await env.STATIC_PAGES.put(post.slug, htmlContent, {
             httpMetadata: {
-                contentType: 'text/html',
-                cacheControl: 'public, max-age=3600' // 1小时缓存
+                contentType: 'text/html'
+                // 不设置缓存控制，由读取时控制
             }
         });
         console.log(`Static page generated and stored for post: ${post.slug}`);
