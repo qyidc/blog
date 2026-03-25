@@ -180,14 +180,17 @@ Sitemap: ${baseUrl}/sitemap.xml
 
 // Yandex verification file
 app.get('/yandex_9dc7bceca234029c.html', async (c) => {
-    const html = `<!DOCTYPE html>
-<html>
+    const html = `<html>
     <head>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     </head>
     <body>Verification: 9dc7bceca234029c</body>
 </html>`;
-    return c.html(html);
+    return new Response(html, {
+        headers: {
+            'Content-Type': 'text/html; charset=UTF-8'
+        }
+    });
 });
 
 // RSS 2.0 Feed
