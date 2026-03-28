@@ -671,9 +671,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mode === 'create') {
             document.getElementById('form-title').textContent = '撰写新文章';
             currentPostId = null; easyMDE.value("");
+            currentPostSlug = null;
         } else {
             document.getElementById('form-title').textContent = '编辑文章';
             currentPostId = post.id;
+            currentPostSlug = post.slug;
             document.getElementById('post-title').value = post.title;
             easyMDE.value(post.content);
             document.getElementById('post-category').value = post.category || '';
@@ -701,6 +703,12 @@ document.addEventListener('DOMContentLoaded', () => {
             is_pinned: document.getElementById('post-is_pinned').checked,
             is_draft: 0
         };
+        
+        // 如果是编辑模式，保留原始的 slug
+        if (currentPostSlug) {
+            data.slug = currentPostSlug;
+        }
+        
         const endpoint = currentPostId ? `/posts/${currentPostId}` : '/posts';
         const method = currentPostId ? 'PUT' : 'POST';
         try { await apiRequest(endpoint, method, data); alert('文章保存成功!'); hidePostForm(); loadPosts(); }
@@ -720,6 +728,12 @@ document.addEventListener('DOMContentLoaded', () => {
             is_pinned: 0,
             is_draft: 1
         };
+        
+        // 如果是编辑模式，保留原始的 slug
+        if (currentPostSlug) {
+            data.slug = currentPostSlug;
+        }
+        
         const endpoint = currentPostId ? `/posts/${currentPostId}` : '/posts';
         const method = currentPostId ? 'PUT' : 'POST';
         try { await apiRequest(endpoint, method, data); alert('草稿保存成功!'); hidePostForm(); loadPosts(); }
