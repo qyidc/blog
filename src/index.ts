@@ -178,21 +178,6 @@ Sitemap: ${baseUrl}/sitemap.xml
     });
 });
 
-// Yandex verification file
-app.get('/yandex_9dc7bceca234029c.html', async (c) => {
-    const html = `<html>
-    <head>
-        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    </head>
-    <body>Verification: 9dc7bceca234029c</body>
-</html>`;
-    return new Response(html, {
-        headers: {
-            'Content-Type': 'text/html; charset=UTF-8'
-        }
-    });
-});
-
 // RSS 2.0 Feed
 app.get('/feed.xml', async (c) => {
     try {
@@ -1618,6 +1603,44 @@ async function generateUniqueSlug(db: D1Database, title: string, excludeId?: str
  */
 async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
     // 1. 数据准备
+    // 配置 Marked 以支持 YouTube 视频嵌入
+    const renderer = new marked.Renderer();
+    
+    // 自定义链接渲染器，支持 YouTube 视频
+    renderer.link = function(href, title, text) {
+        // 检查是否是 YouTube 链接
+        const youtubeRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+        const match = href.match(youtubeRegex);
+        
+        if (match) {
+            // 是 YouTube 链接，生成 iframe 嵌入代码
+            const videoId = match[1];
+            return `
+                <div class="youtube-video-container my-6">
+                    <iframe 
+                        width="100%" 
+                        height="400" 
+                        src="https://www.youtube.com/embed/${videoId}" 
+                        title="${title || text}" 
+                        frameborder="0" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen
+                    ></iframe>
+                </div>
+            `;
+        }
+        
+        // 不是 YouTube 链接，使用默认渲染
+        return `<a href="${href}"${title ? ` title="${title}"` : ""}>${text}</a>`;
+    };
+    
+    // 配置 Marked 选项
+    marked.setOptions({
+        renderer: renderer,
+        breaks: true,
+        gfm: true
+    });
+    
     const bodyHtml = await marked.parse(post.content);
     const publishedAt = post.published_at || new Date().toISOString();
 
