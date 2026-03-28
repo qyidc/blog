@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const API_BASE = '/api';
     let easyMDE;
     let currentPostId = null;
+    let currentPostSlug = null;
     let currentLinkId = null;
 
     // --- 2. DOM 元素缓存 ---
