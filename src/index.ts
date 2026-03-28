@@ -954,9 +954,20 @@ api.put('/posts/:id', async (c) => {
 
         const body = await c.req.json<UpdatePostInput>();
         const updates: Record<string, any> = { ...body };
-        if (body.title && body.title !== originalPost.title) {
+        
+        // 只有在标题改变且用户没有提供自定义 slug 时才重新生成 slug
+        // 这样可以保持 URL 的稳定性
+        if (body.title && body.title !== originalPost.title && !body.slug) {
             updates.slug = await generateUniqueSlug(c.env.DB, body.title, id);
+        } else if (body.slug) {
+            // 如果用户提供了自定义 slug，检查是否唯一
+            const existingPost = await c.env.DB.prepare("SELECT id FROM posts WHERE slug = ? AND id != ?").bind(body.slug, id).first();
+            if (existingPost) {
+                return c.json({ error: 'Slug already exists' }, 400);
+            }
+            updates.slug = body.slug;
         }
+        
         if (body.feature_image === '' || body.feature_image === null) {
             updates.feature_image = '/assets/banner.jpg';
         }
