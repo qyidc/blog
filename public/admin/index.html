@@ -52,6 +52,7 @@
                 </ul>
                 <h3 style="margin-top:2rem; padding: 0 1rem;">系统</h3>
                 <ul>
+                    <li><a href="#analytics" class="nav-link" data-page="analytics-page">访问统计</a></li>
                     <li><a href="#settings" class="nav-link" data-page="settings-page">网站设置</a></li>
                     <li><a href="#tools" class="nav-link" data-page="tools-page">系统工具</a></li>
                     <li><a href="#" id="logout-btn" class="nav-link" style="color: #ef4444;">退出登录</a></li>
@@ -156,6 +157,104 @@
                     <p>当您进行了批量修改（如重命名分类/标签）或修改了页面模板后，静态页面不会自动更新。请在此处手动触发一次全站重建。</p>
                     <footer><button id="rebuild-all-btn" class="contrast" aria-busy="false">开始重建</button></footer>
                 </article>
+            </section>
+            <section id="analytics-page" class="page">
+                <h2>访问统计</h2>
+                <div id="analytics-loading" style="display: flex; justify-content: center; align-items: center; height: 200px;">
+                    <div class="spinner"></div>
+                </div>
+                <div id="analytics-content" style="display: none;">
+                    <!-- 概览卡片 -->
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 2rem;">
+                        <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #0ea5e9;">
+                            <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">总访问量</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-total-visits">0</div>
+                        </div>
+                        <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #6366f1;">
+                            <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">独立IP访问量</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-unique-visits">0</div>
+                        </div>
+                        <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #10b981;">
+                            <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">今日访问量</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-today-visits">0</div>
+                        </div>
+                        <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b;">
+                            <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">平均停留时间</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-avg-duration">0</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 热门页面 -->
+                    <article style="margin-bottom: 2rem;">
+                        <header><strong>热门页面</strong></header>
+                        <div class="table-container">
+                            <table id="analytics-top-pages">
+                                <thead>
+                                    <tr>
+                                        <th>页面路径</th>
+                                        <th>访问次数</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </article>
+                    
+                    <!-- 地理位置 -->
+                    <article style="margin-bottom: 2rem;">
+                        <header><strong>地理位置分布</strong></header>
+                        <div class="table-container">
+                            <table id="analytics-geo-stats">
+                                <thead>
+                                    <tr>
+                                        <th>国家/地区</th>
+                                        <th>访问次数</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </article>
+                    
+                    <!-- 访问来源 -->
+                    <article style="margin-bottom: 2rem;">
+                        <header><strong>访问来源</strong></header>
+                        <div class="table-container">
+                            <table id="analytics-top-sources">
+                                <thead>
+                                    <tr>
+                                        <th>来源</th>
+                                        <th>媒介</th>
+                                        <th>访问次数</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </article>
+                    
+                    <!-- 页面性能 -->
+                    <article>
+                        <header><strong>页面性能</strong></header>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem;">
+                                <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">平均加载时间</div>
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-performance-load">0</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8;">毫秒</div>
+                            </div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem;">
+                                <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">平均DOM加载时间</div>
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-performance-dom">0</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8;">毫秒</div>
+                            </div>
+                            <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem;">
+                                <div style="font-size: 0.875rem; color: #64748b; margin-bottom: 0.25rem;">平均首次绘制时间</div>
+                                <div style="font-size: 1.5rem; font-weight: bold; color: #1e293b;" id="analytics-performance-paint">0</div>
+                                <div style="font-size: 0.75rem; color: #94a3b8;">毫秒</div>
+                            </div>
+                        </div>
+                    </article>
+                </div>
             </section>
         </main>
     </div>

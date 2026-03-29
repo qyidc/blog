@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         images: document.getElementById('images-page'),
         comments: document.getElementById('comments-page'),
         ipBlacklist: document.getElementById('ip-blacklist-page'),
+        analytics: document.getElementById('analytics-page'),
     };
     const navLinks = document.querySelectorAll('.nav-link');
 
@@ -194,6 +195,91 @@ document.addEventListener('DOMContentLoaded', () => {
                 urlInput.value = settings.site_url || '';
                 subtitleInput.value = settings.subtitle || ''; 
             } catch(e) { alert('加载设置失败'); } 
+        }
+    }
+
+    async function loadAnalytics() {
+        const loadingEl = document.getElementById('analytics-loading');
+        const contentEl = document.getElementById('analytics-content');
+        
+        if (!loadingEl || !contentEl) return;
+        
+        try {
+            const result = await apiRequest('/analytics');
+            const data = result.data;
+            
+            // 更新概览数据
+            document.getElementById('analytics-total-visits').textContent = data.total_visits.toLocaleString();
+            document.getElementById('analytics-unique-visits').textContent = data.unique_visits.toLocaleString();
+            document.getElementById('analytics-today-visits').textContent = data.today_visits.toLocaleString();
+            document.getElementById('analytics-avg-duration').textContent = `${data.avg_duration} 秒`;
+            
+            // 更新热门页面
+            const topPagesTable = document.getElementById('analytics-top-pages');
+            if (topPagesTable) {
+                const tbody = topPagesTable.querySelector('tbody');
+                if (tbody) {
+                    if (data.top_pages && data.top_pages.length > 0) {
+                        tbody.innerHTML = data.top_pages.map(page => `
+                            <tr>
+                                <td>${page.page_path}</td>
+                                <td>${page.count}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="2" style="text-align: center;">暂无数据</td></tr>';
+                    }
+                }
+            }
+            
+            // 更新访问来源
+            const topSourcesTable = document.getElementById('analytics-top-sources');
+            if (topSourcesTable) {
+                const tbody = topSourcesTable.querySelector('tbody');
+                if (tbody) {
+                    if (data.top_sources && data.top_sources.length > 0) {
+                        tbody.innerHTML = data.top_sources.map(source => `
+                            <tr>
+                                <td>${source.source || '直接访问'}</td>
+                                <td>${source.medium || 'direct'}</td>
+                                <td>${source.count}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="3" style="text-align: center;">暂无数据</td></tr>';
+                    }
+                }
+            }
+            
+            // 更新地理位置统计
+            const geoStatsTable = document.getElementById('analytics-geo-stats');
+            if (geoStatsTable) {
+                const tbody = geoStatsTable.querySelector('tbody');
+                if (tbody) {
+                    if (data.geo_stats && data.geo_stats.length > 0) {
+                        tbody.innerHTML = data.geo_stats.map(geo => `
+                            <tr>
+                                <td>${geo.country}</td>
+                                <td>${geo.count}</td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="2" style="text-align: center;">暂无数据</td></tr>';
+                    }
+                }
+            }
+            
+            // 更新性能数据
+            document.getElementById('analytics-performance-load').textContent = data.performance.avg_load_time;
+            document.getElementById('analytics-performance-dom').textContent = data.performance.avg_dom_time;
+            document.getElementById('analytics-performance-paint').textContent = data.performance.avg_first_paint;
+            
+            // 显示内容，隐藏加载动画
+            loadingEl.style.display = 'none';
+            contentEl.style.display = 'block';
+        } catch (e) {
+            console.error('加载统计数据失败:', e);
+            loadingEl.innerHTML = `<p style="color:red">加载统计数据失败: ${e.message}</p>`;
         }
     }
 
@@ -896,7 +982,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('loading-screen').style.display = 'none';
             document.querySelector('.app-container').style.display = 'flex';
         // 将数据加载器挂载到全局，方便惰性调用
-        window.pageLoaders = { posts: loadPosts, categories: loadCategories, tags: loadTags, links: loadLinks, settings: loadSettings, images: loadImages, attachments: loadAttachments, comments: loadComments, ipBlacklist: loadIpBlacklist };
+        window.pageLoaders = { posts: loadPosts, categories: loadCategories, tags: loadTags, links: loadLinks, settings: loadSettings, images: loadImages, attachments: loadAttachments, comments: loadComments, ipBlacklist: loadIpBlacklist, analytics: loadAnalytics };
         
         // 渲染所有UI骨架
         pages.posts.innerHTML = `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;"><h2>文章管理</h2><button id="show-post-form-btn">撰写新文章</button></div>

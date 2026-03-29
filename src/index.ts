@@ -680,6 +680,67 @@ api.get('/statistics', async (c) => {
     }
 });
 
+// [新增] 访问统计接口
+api.get('/analytics', async (c) => {
+    try {
+        // 总访问量
+        const totalVisits = await c.env.DB.prepare("SELECT COUNT(*) as count FROM page_views").first<{ count: number }>();
+        
+        // 独立IP访问量
+        const uniqueVisits = await c.env.DB.prepare("SELECT COUNT(DISTINCT ip_address) as count FROM page_views WHERE ip_address != 'unknown'").first<{ count: number }>();
+        
+        // 今日访问量
+        const today = new Date().toISOString().split('T')[0];
+        const todayVisits = await c.env.DB.prepare("SELECT COUNT(*) as count FROM page_views WHERE date(created_at) = ?").bind(today).first<{ count: number }>();
+        
+        // 热门页面
+        const topPages = await c.env.DB.prepare(
+            "SELECT page_path, COUNT(*) as count FROM page_views GROUP BY page_path ORDER BY count DESC LIMIT 10"
+        ).all();
+        
+        // 访问来源
+        const topSources = await c.env.DB.prepare(
+            "SELECT source, medium, COUNT(*) as count FROM referral_sources GROUP BY source, medium ORDER BY count DESC LIMIT 10"
+        ).all();
+        
+        // 地理位置统计
+        const geoStats = await c.env.DB.prepare(
+            "SELECT country, COUNT(*) as count FROM page_views WHERE country != 'unknown' GROUP BY country ORDER BY count DESC LIMIT 10"
+        ).all();
+        
+        // 平均停留时间
+        const avgDuration = await c.env.DB.prepare(
+            "SELECT AVG(duration) as avg FROM page_views WHERE duration > 0"
+        ).first<{ avg: number }>();
+        
+        // 页面性能 - 只计算非负数
+        const performanceStats = await c.env.DB.prepare(
+            "SELECT AVG(CASE WHEN load_time > 0 THEN load_time ELSE 0 END) as avg_load_time, AVG(CASE WHEN dom_content_loaded > 0 THEN dom_content_loaded ELSE 0 END) as avg_dom_time, AVG(CASE WHEN first_paint > 0 THEN first_paint ELSE 0 END) as avg_first_paint FROM page_performance"
+        ).first<{ avg_load_time: number, avg_dom_time: number, avg_first_paint: number }>();
+
+        return c.json({
+            success: true,
+            data: {
+                total_visits: totalVisits?.count || 0,
+                unique_visits: uniqueVisits?.count || 0,
+                today_visits: todayVisits?.count || 0,
+                top_pages: topPages.results || [],
+                top_sources: topSources.results || [],
+                geo_stats: geoStats.results || [],
+                avg_duration: Math.round(avgDuration?.avg || 0),
+                performance: {
+                    avg_load_time: Math.round(performanceStats?.avg_load_time || 0),
+                    avg_dom_time: Math.round(performanceStats?.avg_dom_time || 0),
+                    avg_first_paint: Math.round(performanceStats?.avg_first_paint || 0)
+                }
+            }
+        });
+    } catch (e: any) {
+        console.error('获取访问统计数据失败:', e);
+        return c.json({ error: '获取访问统计数据失败' }, 500);
+    }
+});
+
 // [新增] 系统工具 API：重建所有静态页面
 // 分类 API (已补全)
 api.get('/categories', async (c) => {
@@ -1526,6 +1587,118 @@ app.get('/api/posts/:postId/views', async (c) => {
     }
 });
 
+// 访问统计 API 路由 (公共API，不需要认证)
+
+// 页面访问跟踪
+app.post('/api/tracking/page-view', async (c) => {
+    try {
+        const { page_path, referrer, user_agent, session_id, post_id } = await c.req.json<{
+            page_path: string;
+            referrer: string;
+            user_agent: string;
+            session_id: string;
+            post_id: string | null;
+        }>();
+
+        // 获取用户IP
+        const ip_address = c.req.header('CF-Connecting-IP') || 
+                      c.req.header('X-Forwarded-For')?.split(',')[0].trim() || 
+                      'unknown';
+
+        // 获取地理位置信息
+        const country = c.req.header('CF-IPCountry') || 'unknown';
+        const city = c.req.header('CF-IPCity') || 'unknown';
+
+        // 解析来源信息
+        let source = '';
+        let medium = '';
+        let campaign = '';
+
+        if (referrer) {
+            try {
+                const referrerUrl = new URL(referrer);
+                source = referrerUrl.hostname;
+                
+                // 简单的来源分类
+                if (source.includes('google')) {
+                    medium = 'organic';
+                } else if (source.includes('bing') || source.includes('baidu') || source.includes('sogou')) {
+                    medium = 'organic';
+                } else if (source.includes('facebook') || source.includes('twitter') || source.includes('weibo')) {
+                    medium = 'social';
+                } else if (source.includes('linkedin')) {
+                    medium = 'social';
+                } else {
+                    medium = 'referral';
+                }
+            } catch (e) {
+                // 无效的URL，忽略
+            }
+        } else {
+            medium = 'direct';
+            source = 'direct';
+        }
+
+        // 插入页面访问记录
+        const now = new Date().toISOString();
+        await c.env.DB.prepare(
+            'INSERT INTO page_views (post_id, page_path, referrer, user_agent, ip_address, session_id, country, city, created_at, last_viewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).bind(post_id, page_path, referrer, user_agent, ip_address, session_id, country, city, now, now).run();
+
+        // 插入或更新来源统计
+        await c.env.DB.prepare(
+            'INSERT INTO referral_sources (source, medium, campaign, page_path, count, created_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(source, medium, campaign, page_path) DO UPDATE SET count = count + 1'
+        ).bind(source, medium, campaign, page_path, now).run();
+
+        return c.json({ success: true });
+    } catch (e: any) {
+        console.error('页面访问跟踪失败:', e);
+        return c.json({ error: '页面访问跟踪失败' }, 500);
+    }
+});
+
+// 性能数据跟踪
+app.post('/api/tracking/performance', async (c) => {
+    try {
+        const { page_path, load_time, dom_content_loaded, first_paint } = await c.req.json<{
+            page_path: string;
+            load_time: number;
+            dom_content_loaded: number;
+            first_paint: number;
+        }>();
+
+        await c.env.DB.prepare(
+            'INSERT INTO page_performance (page_path, load_time, dom_content_loaded, first_paint, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).bind(page_path, load_time, dom_content_loaded, first_paint, new Date().toISOString()).run();
+
+        return c.json({ success: true });
+    } catch (e: any) {
+        console.error('性能数据跟踪失败:', e);
+        return c.json({ error: '性能数据跟踪失败' }, 500);
+    }
+});
+
+// 页面停留时间跟踪
+app.post('/api/tracking/page-duration', async (c) => {
+    try {
+        const { page_path, session_id, duration } = await c.req.json<{
+            page_path: string;
+            session_id: string;
+            duration: number;
+        }>();
+
+        // 更新页面访问记录的停留时间
+        await c.env.DB.prepare(
+            'UPDATE page_views SET duration = ? WHERE session_id = ? AND page_path = ? AND duration = 0'
+        ).bind(duration, session_id, page_path).run();
+
+        return c.json({ success: true });
+    } catch (e: any) {
+        console.error('停留时间跟踪失败:', e);
+        return c.json({ error: '停留时间跟踪失败' }, 500);
+    }
+});
+
 // 评论提交 API 路由 (公共API，不需要认证)
 app.post('/api/posts/:postId/comments', async (c) => {
     const postId = c.req.param('postId');
@@ -1840,6 +2013,78 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
                     console.error('Views update error:', e);
                 }
             }
+
+            // 访问统计跟踪
+            (function() {
+                // 生成会话ID
+                let sessionId = localStorage.getItem('session_id');
+                if (!sessionId) {
+                    sessionId = Math.random().toString(36).substr(2, 9);
+                    localStorage.setItem('session_id', sessionId);
+                }
+
+                // 记录页面加载开始时间
+                const pageLoadStart = performance.now();
+
+                // 收集页面信息
+                const pageInfo = {
+                    page_path: window.location.pathname,
+                    referrer: document.referrer || '',
+                    user_agent: navigator.userAgent,
+                    session_id: sessionId,
+                    post_id: postId || null
+                };
+
+                // 发送页面访问数据
+                function sendData(url, data) {
+                    if (navigator.sendBeacon) {
+                        // 使用sendBeacon API确保数据可靠发送
+                        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+                        navigator.sendBeacon(url, blob);
+                    } else {
+                        // 降级使用fetch API
+                        fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data),
+                            keepalive: true
+                        }).catch(err => console.error('Failed to track data:', err));
+                    }
+                }
+
+                // 发送页面访问数据
+                sendData('/api/tracking/page-view', pageInfo);
+
+                // 收集性能数据
+                if (performance && performance.timing) {
+                    const timing = performance.timing;
+                    // 计算性能指标，确保非负数
+                    const loadTime = Math.max(0, Math.round(timing.loadEventEnd - timing.navigationStart));
+                    const domContentLoaded = Math.max(0, Math.round(timing.domContentLoadedEventEnd - timing.navigationStart));
+                    const firstPaint = Math.max(0, Math.round(performance.getEntriesByType('paint')[0]?.startTime || 0));
+                    
+                    const performanceData = {
+                        page_path: window.location.pathname,
+                        load_time: loadTime,
+                        dom_content_loaded: domContentLoaded,
+                        first_paint: firstPaint
+                    };
+
+                    // 发送性能数据
+                    sendData('/api/tracking/performance', performanceData);
+                }
+
+                // 记录页面停留时间
+                let startTime = Date.now();
+                window.addEventListener('beforeunload', function() {
+                    const duration = Math.round((Date.now() - startTime) / 1000);
+                    sendData('/api/tracking/page-duration', {
+                        page_path: window.location.pathname,
+                        session_id: sessionId,
+                        duration: duration
+                    });
+                });
+            })();
 
             // 评论表单提交
             const commentForm = document.getElementById('comment-form');
