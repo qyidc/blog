@@ -23,10 +23,12 @@ interface Post {
   tags: string;
   published_at: string;
   is_published: boolean;
+  is_draft: number;
+  is_pinned: number;
   feature_image?: string;
 }
 type CreatePostInput = Omit<Post, 'id' | 'slug' | 'published_at' | 'tags'> & { tags?: string[], is_draft?: number, is_pinned?: number };
-type UpdatePostInput = Partial<CreatePostInput>;
+type UpdatePostInput = Partial<CreatePostInput> & { slug?: string };
 
 
 // --- 2. 认证中间件 ---
@@ -381,17 +383,43 @@ app.get('/', async (c) => {
 app.get('/blog/:slug', async (c) => {
     const slug = c.req.param('slug');
     try {
+        // 1. 尝试从 R2 存储桶获取静态页面
         const object = await c.env.STATIC_PAGES.get(slug);
-        if (object === null) return c.text('文章未找到', 404);
-        const headers = new Headers();
-        object.writeHttpMetadata(headers);
-        headers.set('etag', object.httpEtag);
-        // 禁用缓存，确保总是获取最新内容
-        headers.set('cache-control', 'no-cache, no-store, must-revalidate');
-        headers.set('pragma', 'no-cache');
-        headers.set('expires', '0');
-        return new Response(object.body, { headers });
+        if (object !== null) {
+            const headers = new Headers();
+            object.writeHttpMetadata(headers);
+            headers.set('etag', object.httpEtag);
+            // 禁用缓存，确保总是获取最新内容
+            headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+            headers.set('pragma', 'no-cache');
+            headers.set('expires', '0');
+            return new Response(object.body, { headers });
+        }
+        
+        // 2. 如果静态页面不存在，尝试从数据库获取文章并动态生成页面
+        const post = await c.env.DB.prepare("SELECT * FROM posts WHERE slug = ? AND is_published = true").bind(slug).first<Post>();
+        if (!post) return c.text('文章未找到', 404);
+        
+        // 3. 生成静态页面
+        await generateAndStoreStaticPage(c.env, post);
+        
+        // 4. 再次尝试获取静态页面
+        const newObject = await c.env.STATIC_PAGES.get(slug);
+        if (newObject !== null) {
+            const headers = new Headers();
+            newObject.writeHttpMetadata(headers);
+            headers.set('etag', newObject.httpEtag);
+            // 禁用缓存，确保总是获取最新内容
+            headers.set('cache-control', 'no-cache, no-store, must-revalidate');
+            headers.set('pragma', 'no-cache');
+            headers.set('expires', '0');
+            return new Response(newObject.body, { headers });
+        }
+        
+        // 5. 如果仍然无法获取静态页面，返回错误
+        return c.text('文章未找到', 404);
     } catch (e: any) {
+        console.error('获取文章失败:', e);
         return c.text('获取文章失败', 500);
     }
 });
@@ -707,15 +735,49 @@ api.post('/rebuild-all', async (c) => {
         const { results } = await c.env.DB.prepare("SELECT * FROM posts WHERE is_published = true").all<Post>();
         if (results && results.length > 0) {
             console.log(`准备重建 ${results.length} 篇文章...`);
+            let successCount = 0;
+            let failureCount = 0;
+            const failedPosts: string[] = [];
+            
             for (const post of results) {
                 if (post.slug) {
-                  console.log(`正在重建: ${post.slug}`);
-                  try { await generateAndStoreStaticPage(c.env, post); }
-                  catch (e) { console.error(`重建文章 ${post.slug} 时失败:`, e); }
+                    console.log(`正在重建: ${post.slug} (ID: ${post.id}, 发布时间: ${post.published_at})`);
+                    try { 
+                        const success = await generateAndStoreStaticPage(c.env, post);
+                        if (success) {
+                            console.log(`✓ 成功重建: ${post.slug}`);
+                            successCount++;
+                        } else {
+                            console.log(`✗ 重建失败: ${post.slug}`);
+                            failureCount++;
+                            failedPosts.push(`${post.slug} (ID: ${post.id})`);
+                        }
+                    } catch (e) { 
+                        console.error(`✗ 重建文章 ${post.slug} (ID: ${post.id}) 时失败:`, e);
+                        console.error(`文章数据:`, JSON.stringify({
+                            id: post.id,
+                            title: post.title,
+                            slug: post.slug,
+                            published_at: post.published_at,
+                            is_published: post.is_published,
+                            content_length: post.content?.length || 0
+                        }));
+                        failureCount++;
+                        failedPosts.push(`${post.slug} (ID: ${post.id})`);
+                    }
+                } else {
+                    console.warn(`⚠ 文章 ID ${post.id} 没有 slug，跳过重建`);
+                    failureCount++;
+                    failedPosts.push(`ID: ${post.id} (无slug)`);
                 }
             }
+            
+            console.log(`--- [系统任务] 静态页面重建完成 ---`);
+            console.log(`重建结果: 成功 ${successCount} 篇, 失败 ${failureCount} 篇`);
+            if (failedPosts.length > 0) {
+                console.log(`失败的文章: ${failedPosts.join(', ')}`);
+            }
         }
-        console.log("--- [系统任务] 静态页面重建完成 ---");
     })());
     return c.json({ message: '重建任务已在后台成功启动！' });
 });
@@ -914,7 +976,7 @@ api.post('/posts', async (c) => {
         const newPost: Post = {
             id, title: body.title, slug, content: body.content || '', category: body.category,
             tags: JSON.stringify(body.tags || []), feature_image: featureImage,
-            is_published: body.is_published ?? true, published_at: publishedAt,
+            is_published: body.is_published ?? true, is_draft: body.is_draft ?? 0, is_pinned: body.is_pinned ?? 0, published_at: publishedAt,
         };
 
         // 更新图片关联
@@ -958,6 +1020,7 @@ api.put('/posts/:id', async (c) => {
         // 只有在标题改变且用户没有提供自定义 slug 时才重新生成 slug
         // 这样可以保持 URL 的稳定性
         if (body.title && body.title !== originalPost.title && !body.slug) {
+            // 标题改变且用户没有提供自定义 slug，才重新生成 slug
             updates.slug = await generateUniqueSlug(c.env.DB, body.title, id);
         } else if (body.slug) {
             // 如果用户提供了自定义 slug，检查是否唯一
@@ -966,6 +1029,9 @@ api.put('/posts/:id', async (c) => {
                 return c.json({ error: 'Slug already exists' }, 400);
             }
             updates.slug = body.slug;
+        } else {
+            // 用户没有提供自定义 slug，且标题没有改变，保持原始 slug
+            updates.slug = originalPost.slug;
         }
         
         if (body.feature_image === '' || body.feature_image === null) {
@@ -992,11 +1058,14 @@ api.put('/posts/:id', async (c) => {
             ...updates,
             content: finalContent,
             tags: updates.tags || originalPost.tags,
-            feature_image: finalFeatureImage
+            feature_image: finalFeatureImage,
+            // 确保 slug 保持不变，使用原始 slug 或更新后的 slug
+            slug: updates.slug || originalPost.slug
         };
 
         // 异步更新静态页面
         c.executionCtx.waitUntil((async () => {
+            console.log(`[更新文章] 开始更新静态页面: ${updatedPost.slug} (ID: ${id})`);
             // 1. 生成当前文章的静态页面
             await generateAndStoreStaticPage(c.env, updatedPost);
             
@@ -1613,15 +1682,23 @@ async function generateUniqueSlug(db: D1Database, title: string, excludeId?: str
  * @param post - 文章对象
  */
 async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
+    console.log(`[generateAndStoreStaticPage] 开始生成静态页面: ${post.slug} (ID: ${post.id})`);
+    
+    // 验证必要字段
+    if (!post.id || !post.slug) {
+        throw new Error(`文章缺少必要字段: id=${post.id}, slug=${post.slug}`);
+    }
+    
     // 1. 数据准备
     // 配置 Marked 以支持 YouTube 视频嵌入
     const renderer = new marked.Renderer();
     
     // 自定义链接渲染器，支持 YouTube 视频
-    renderer.link = function(href, title, text) {
+    renderer.link = function({ href, title, text }) {
+        // 在marked 15+版本中，参数是一个对象
         // 检查是否是 YouTube 链接
         const youtubeRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-        const match = href.match(youtubeRegex);
+        const match = href ? href.match(youtubeRegex) : null;
         
         if (match) {
             // 是 YouTube 链接，生成 iframe 嵌入代码
@@ -1645,43 +1722,57 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
         return `<a href="${href}"${title ? ` title="${title}"` : ""}>${text}</a>`;
     };
     
-    // 配置 Marked 选项
-    marked.setOptions({
-        renderer: renderer,
-        breaks: true,
-        gfm: true
-    });
-    
-    const bodyHtml = await marked.parse(post.content);
+    let bodyHtml = '';
+    try {
+        // 确保content是字符串类型
+        const contentToParse = typeof post.content === 'string' ? post.content : '';
+        
+        // 使用marked的正确API - marked.parse是同步的，不需要await
+        bodyHtml = marked.parse(contentToParse || '', {
+            renderer: renderer,
+            breaks: true,
+            gfm: true
+        });
+        console.log(`[generateAndStoreStaticPage] Markdown解析成功，HTML长度: ${bodyHtml.length}`);
+    } catch (error) {
+        console.error(`[generateAndStoreStaticPage] Markdown解析失败:`, error);
+        // 确保content是字符串类型
+        const contentToDisplay = typeof post.content === 'string' ? post.content : '';
+        bodyHtml = `<p>${contentToDisplay || ''}</p>`;
+    }
     const publishedAt = post.published_at || new Date().toISOString();
 
+    // 为每个查询添加错误处理，确保即使某些查询失败，静态页面仍然能够生成
     const [prevPost, nextPost, subtitleResult, blogTitleResult, viewsResult, commentsCountResult, commentsResult] = await Promise.all([
-        env.DB.prepare("SELECT title, slug FROM posts WHERE is_published = true AND published_at < ? ORDER BY published_at DESC LIMIT 1").bind(publishedAt).first<{ title: string; slug: string }>(),
-        env.DB.prepare("SELECT title, slug FROM posts WHERE is_published = true AND published_at > ? ORDER BY published_at ASC LIMIT 1").bind(publishedAt).first<{ title: string; slug: string }>(),
-        env.DB.prepare("SELECT value FROM settings WHERE key = 'subtitle'").first<{ value: string }>(),
-        env.DB.prepare("SELECT value FROM settings WHERE key = 'blog_title'").first<{ value: string }>(),
-        env.DB.prepare("SELECT view_count FROM post_views WHERE post_id = ?").bind(post.id).first<{ view_count: number }>(),
-        env.DB.prepare("SELECT COUNT(*) as count FROM comments WHERE post_id = ? AND is_approved = 1").bind(post.id).first<{ count: number }>(),
-        env.DB.prepare("SELECT id, author, content, created_at, parent_id, reply_to FROM comments WHERE post_id = ? AND is_approved = 1 ORDER BY created_at ASC").bind(post.id).all()
+        env.DB.prepare("SELECT title, slug FROM posts WHERE is_published = true AND published_at < ? ORDER BY published_at DESC LIMIT 1").bind(publishedAt).first<{ title: string; slug: string }>().catch(() => null),
+        env.DB.prepare("SELECT title, slug FROM posts WHERE is_published = true AND published_at > ? ORDER BY published_at ASC LIMIT 1").bind(publishedAt).first<{ title: string; slug: string }>().catch(() => null),
+        env.DB.prepare("SELECT value FROM settings WHERE key = 'subtitle'").first<{ value: string }>().catch(() => null),
+        env.DB.prepare("SELECT value FROM settings WHERE key = 'blog_title'").first<{ value: string }>().catch(() => null),
+        env.DB.prepare("SELECT view_count FROM post_views WHERE post_id = ?").bind(post.id).first<{ view_count: number }>().catch(() => null),
+        env.DB.prepare("SELECT COUNT(*) as count FROM comments WHERE post_id = ? AND is_approved = 1").bind(post.id).first<{ count: number }>().catch(() => null),
+        env.DB.prepare("SELECT id, author, content, created_at, parent_id, reply_to FROM comments WHERE post_id = ? AND is_approved = 1 ORDER BY created_at ASC").bind(post.id).all().catch(() => ({ results: [] }))
     ]);
 
     // 2. 计算阅读量
     const viewCount = viewsResult?.view_count || 0;
 
     // 3. 生成评论HTML
-    const commentsHtml = commentsResult.results.map((comment: any) => `
-        <div class="bg-slate-50 p-4 rounded-lg mb-4">
-            <div class="flex justify-between items-center mb-2">
-                <strong class="text-slate-900">${comment.author}</strong>
-                <span class="text-xs text-slate-500">${new Date(comment.created_at).toLocaleString()}</span>
+    let commentsHtml = '<p class="text-slate-500 text-center">暂无评论</p>';
+    if (commentsResult && commentsResult.results && commentsResult.results.length > 0) {
+        commentsHtml = commentsResult.results.map((comment: any) => `
+            <div class="bg-slate-50 p-4 rounded-lg mb-4">
+                <div class="flex justify-between items-center mb-2">
+                    <strong class="text-slate-900">${comment.author}</strong>
+                    <span class="text-xs text-slate-500">${new Date(comment.created_at).toLocaleString()}</span>
+                </div>
+                ${comment.reply_to ? `<p class="text-sm text-slate-500 mb-2">回复 <strong>@${comment.reply_to}</strong></p>` : ''}
+                <p class="text-slate-700">${comment.content}</p>
+                <div class="mt-2">
+                    <button class="reply-btn text-xs text-sky-600 hover:underline" data-id="${comment.id}" data-author="${comment.author}">回复</button>
+                </div>
             </div>
-            ${comment.reply_to ? `<p class="text-sm text-slate-500 mb-2">回复 <strong>@${comment.reply_to}</strong></p>` : ''}
-            <p class="text-slate-700">${comment.content}</p>
-            <div class="mt-2">
-                <button class="reply-btn text-xs text-sky-600 hover:underline" data-id="${comment.id}" data-author="${comment.author}">回复</button>
-            </div>
-        </div>
-    `).join('') || '<p class="text-slate-500 text-center">暂无评论</p>';
+        `).join('');
+    }
 
     // 4. 生成完整HTML
     const ICONS = {
@@ -1815,19 +1906,34 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
         });
     `;
 
-    const tagsHtml = post.tags ? (() => {
-        const tags = JSON.parse(post.tags);
-        const maxTags = 10;
-        const tagsToShow = tags.slice(0, maxTags);
-        const tagsLinks = tagsToShow.map((tag: string) => `<a href="/tags/${tag}" class="text-sm text-sky-600 hover:underline">${tag}</a>`).join(', ');
-        const moreHtml = tags.length > maxTags ? `<span class="text-sm text-slate-500">等${tags.length}个标签</span>` : '';
-        return `
-    <div class="py-4 border-t border-slate-100 flex flex-wrap gap-2 mb-6">
-        <span class="text-sm font-medium text-slate-500">标签:</span>
-        ${tagsLinks}${moreHtml}
-    </div>
-    `;
-    })() : '';
+    let tagsHtml = '';
+    try {
+        if (post.tags && typeof post.tags === 'string') {
+            try {
+                const tags = JSON.parse(post.tags);
+                // 确保tags是数组
+                if (Array.isArray(tags)) {
+                    const maxTags = 10;
+                    const tagsToShow = tags.slice(0, maxTags);
+                    const tagsLinks = tagsToShow.map((tag: string) => `<a href="/tags/${tag}" class="text-sm text-sky-600 hover:underline">${tag}</a>`).join(', ');
+                    const moreHtml = tags.length > maxTags ? `<span class="text-sm text-slate-500">等${tags.length}个标签</span>` : '';
+                    tagsHtml = `
+<div class="py-4 border-t border-slate-100 flex flex-wrap gap-2 mb-6">
+    <span class="text-sm font-medium text-slate-500">标签:</span>
+    ${tagsLinks}${moreHtml}
+</div>
+`;
+                }
+            } catch (jsonError) {
+                console.error(`[generateAndStoreStaticPage] 标签JSON解析失败:`, jsonError);
+                // 即使JSON解析失败，也继续执行，不影响静态页面生成
+            }
+        }
+        console.log(`[generateAndStoreStaticPage] 标签HTML生成成功`);
+    } catch (error) {
+        console.error(`[generateAndStoreStaticPage] 标签HTML生成失败:`, error);
+        tagsHtml = '';
+    }
 
     const htmlContent = `
     <!DOCTYPE html>
@@ -1977,16 +2083,19 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
 
     // 4. 上传到 R2 存储桶
     try {
+        console.log(`[generateAndStoreStaticPage] 准备上传到 R2: ${post.slug}, HTML 长度: ${htmlContent.length}`);
         await env.STATIC_PAGES.put(post.slug, htmlContent, {
             httpMetadata: {
                 contentType: 'text/html'
                 // 不设置缓存控制，由读取时控制
             }
         });
-        console.log(`Static page generated and stored for post: ${post.slug}`);
+        console.log(`✓ Static page generated and stored for post: ${post.slug}`);
+        return true;
     } catch (error) {
-        console.error('Error storing static page:', error);
-        throw error;
+        console.error(`✗ Error storing static page for ${post.slug}:`, error);
+        // 不再抛出错误，而是返回 false，表示上传失败
+        return false;
     }
 }
 

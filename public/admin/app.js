@@ -705,9 +705,21 @@ document.addEventListener('DOMContentLoaded', () => {
             is_draft: 0
         };
         
-        // 如果是编辑模式，保留原始的 slug
-        if (currentPostSlug) {
-            data.slug = currentPostSlug;
+        // 如果是编辑模式，始终保留原始的 slug，即使 currentPostSlug 为空
+        if (currentPostId) {
+            // 如果没有保存的 slug，从数据库重新获取
+            if (!currentPostSlug) {
+                try {
+                    const post = await apiRequest(`/posts/${currentPostId}`);
+                    if (post && post.slug) {
+                        data.slug = post.slug;
+                    }
+                } catch (err) {
+                    console.error('获取文章 slug 失败:', err);
+                }
+            } else {
+                data.slug = currentPostSlug;
+            }
         }
         
         const endpoint = currentPostId ? `/posts/${currentPostId}` : '/posts';
@@ -730,9 +742,21 @@ document.addEventListener('DOMContentLoaded', () => {
             is_draft: 1
         };
         
-        // 如果是编辑模式，保留原始的 slug
-        if (currentPostSlug) {
-            data.slug = currentPostSlug;
+        // 如果是编辑模式，始终保留原始的 slug，即使 currentPostSlug 为空
+        if (currentPostId) {
+            // 如果没有保存的 slug，从数据库重新获取
+            if (!currentPostSlug) {
+                try {
+                    const post = await apiRequest(`/posts/${currentPostId}`);
+                    if (post && post.slug) {
+                        data.slug = post.slug;
+                    }
+                } catch (err) {
+                    console.error('获取文章 slug 失败:', err);
+                }
+            } else {
+                data.slug = currentPostSlug;
+            }
         }
         
         const endpoint = currentPostId ? `/posts/${currentPostId}` : '/posts';
