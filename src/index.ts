@@ -1728,11 +1728,12 @@ async function generateAndStoreStaticPage(env: Env['Bindings'], post: Post) {
         const contentToParse = typeof post.content === 'string' ? post.content : '';
         
         // 使用marked的正确API - marked.parse是同步的，不需要await
+        // 添加类型断言，确保返回类型为string
         bodyHtml = marked.parse(contentToParse || '', {
             renderer: renderer,
             breaks: true,
             gfm: true
-        });
+        }) as string;
         console.log(`[generateAndStoreStaticPage] Markdown解析成功，HTML长度: ${bodyHtml.length}`);
     } catch (error) {
         console.error(`[generateAndStoreStaticPage] Markdown解析失败:`, error);
